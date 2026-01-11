@@ -1,0 +1,38 @@
+:root{
+  --bg:#0f1724;
+  --card:#0b1220;
+  --muted:#9aa6b2;
+  --accent:#60a5fa;
+  --glass: rgba(255,255,255,0.03);
+}
+*{box-sizing:border-box}
+html,body,#root{height:100%}
+body{
+  margin:0;
+  font-family:Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+  background: linear-gradient(180deg,#071122 0%, #071428 60%);
+  color:#e6eef6;
+  -webkit-font-smoothing:antialiased;
+  -moz-osx-font-smoothing:grayscale;
+}
+.page{max-width:1000px;margin:48px auto;padding:24px}
+.hero{background:linear-gradient(90deg, rgba(96,165,250,0.08), transparent);padding:36px;border-radius:12px;box-shadow:0 6px 24px rgba(2,6,23,0.6)}
+.title{margin:0;font-size:28px;letter-spacing:-0.5px}
+.subtitle{margin:6px 0 18px;color:var(--muted)}
+.search-wrap{max-width:720px}
+.search-input{display:flex;gap:8px;background:var(--glass);padding:8px;border-radius:10px;border:1px solid rgba(255,255,255,0.03)}
+.search-input input{flex:1;background:transparent;border:0;color:inherit;padding:12px 10px;font-size:16px;outline:none}
+.search-input button{background:linear-gradient(180deg,var(--accent),#3b82f6);border:0;padding:10px 14px;border-radius:8px;color:#04263b;font-weight:600;cursor:pointer}
+.suggestions{list-style:none;margin:8px 0 0;padding:6px;border-radius:8px;background:#051323;border:1px solid rgba(255,255,255,0.02);max-width:720px}
+.suggestions li{padding:8px;border-radius:6px;cursor:pointer}
+.suggestions li:hover{background:rgba(255,255,255,0.02)}
+.results{margin-top:18px;display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}
+.card{background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,0.02);display:flex;gap:12px;align-items:center}
+.avatar{width:56px;height:56px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-weight:700;background:#0b2030;color:var(--accent);font-size:18px}
+.info{flex:1}
+.name{margin:0;font-weight:600}
+.role{margin:4px 0 0;color:var(--muted);font-size:13px}
+.hint{color:var(--muted)}
+.foot{text-align:center;color:var(--muted);margin-top:28px}
+.visually-hidden{position:absolute!important;height:1px;width:1px;overflow:hidden;clip:rect(1px,1px,1px,1px);white-space:nowrap}
+@media (max-width:600px){.page{margin:20px 16px}.title{font-size:22px}.avatar{width:48px;height:48px}}

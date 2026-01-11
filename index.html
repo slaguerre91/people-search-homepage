@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>People Search — Home</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main class="page">
+    <header class="hero">
+      <h1 class="title">Find People</h1>
+      <p class="subtitle">Quickly search profiles. This is a static demo — no backend yet.</p>
+      <div class="search-wrap" role="search">
+        <label for="search" class="visually-hidden">Search people</label>
+        <div class="search-input">
+          <input id="search" placeholder="Search by name, role, or location" autocomplete="off"/>
+          <button id="searchBtn" aria-label="Search">🔎</button>
+        </div>
+        <ul id="suggestions" class="suggestions" aria-label="Suggestions" hidden></ul>
+      </div>
+    </header>
+
+    <section class="results" id="results" aria-live="polite">
+      <!-- JS will populate results here -->
+      <p class="hint">Try typing "Alice", "design", or "NY" to see example results.</p>
+    </section>
+
+    <footer class="foot">Built with ❤️ — static demo</footer>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
