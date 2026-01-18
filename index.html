@@ -1,34 +1,146 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>People Search — Home</title>
-  <link rel="stylesheet" href="styles.css" />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>People Search</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; max-width: 800px; margin: 40px auto; padding: 20px; background: #0f172a; color: #e2e8f0; }
+    h1 { color: #60a5fa; }
+    .search-box { display: flex; gap: 8px; margin-bottom: 20px; }
+    input, button { padding: 10px 14px; font-size: 16px; border: none; border-radius: 6px; }
+    input { flex: 1; background: #1e293b; color: #e2e8f0; }
+    button { background: #3b82f6; color: white; cursor: pointer; }
+    button:hover { background: #2563eb; }
+    .results { display: grid; gap: 12px; }
+    .card { background: #1e293b; padding: 16px; border-radius: 8px; cursor: pointer; }
+    .card:hover { background: #334155; }
+    .card h3 { margin: 0 0 4px; color: #60a5fa; }
+    .card p { margin: 0; color: #94a3b8; font-size: 14px; }
+    .profile { background: #1e293b; padding: 20px; border-radius: 8px; margin-top: 20px; }
+    .profile h2 { color: #60a5fa; margin-top: 0; }
+    .review { background: #0f172a; padding: 12px; border-radius: 6px; margin-top: 10px; }
+    .review-form { margin-top: 16px; display: flex; flex-direction: column; gap: 8px; }
+    .review-form input, .review-form textarea { background: #0f172a; color: #e2e8f0; }
+    .review-form textarea { min-height: 60px; resize: vertical; padding: 10px; border-radius: 6px; border: none; }
+    .back-btn { background: #475569; margin-bottom: 16px; }
+    .hidden { display: none; }
+    .status { color: #fbbf24; margin: 10px 0; }
+  </style>
 </head>
 <body>
-  <main class="page">
-    <header class="hero">
-      <h1 class="title">Find People</h1>
-      <p class="subtitle">Quickly search profiles. This is a static demo — no backend yet.</p>
-      <div class="search-wrap" role="search">
-        <label for="search" class="visually-hidden">Search people</label>
-        <div class="search-input">
-          <input id="search" placeholder="Search by name, role, or location" autocomplete="off"/>
-          <button id="searchBtn" aria-label="Search">🔎</button>
+  <h1>🔍 People Search</h1>
+
+  <!-- Search View -->
+  <div id="searchView">
+    <div class="search-box">
+      <input type="text" id="searchInput" placeholder="Search by name, role, or location...">
+      <button onclick="doSearch()">Search</button>
+    </div>
+    <div id="results" class="results"></div>
+  </div>
+
+  <!-- Profile View -->
+  <div id="profileView" class="hidden">
+    <button class="back-btn" onclick="showSearch()">← Back to Search</button>
+    <div id="profileContent" class="profile"></div>
+  </div>
+
+  <script>
+    const API = 'http://localhost:8000';
+
+    // Search
+    async function doSearch() {
+      const q = document.getElementById('searchInput').value;
+      const res = await fetch(`${API}/search?q=${encodeURIComponent(q)}`);
+      const people = await res.json();
+      renderResults(people);
+    }
+
+    function renderResults(people) {
+      const el = document.getElementById('results');
+      if (!people.length) {
+        el.innerHTML = '<p>No results found.</p>';
+        return;
+      }
+      el.innerHTML = people.map(p => `
+        <div class="card" onclick="viewProfile('${p.id}')">
+          <h3>${p.name}</h3>
+          <p>${p.role} • ${p.location}</p>
         </div>
-        <ul id="suggestions" class="suggestions" aria-label="Suggestions" hidden></ul>
-      </div>
-    </header>
+      `).join('');
+    }
 
-    <section class="results" id="results" aria-live="polite">
-      <!-- JS will populate results here -->
-      <p class="hint">Try typing "Alice", "design", or "NY" to see example results.</p>
-    </section>
+    // View Profile
+    async function viewProfile(id) {
+      const res = await fetch(`${API}/profiles/${id}`);
+      if (!res.ok) { alert('Profile not found'); return; }
+      const profile = await res.json();
+      renderProfile(profile);
+      document.getElementById('searchView').classList.add('hidden');
+      document.getElementById('profileView').classList.remove('hidden');
+    }
 
-    <footer class="foot">Built with ❤️ — static demo</footer>
-  </main>
+    function renderProfile(p) {
+      const reviews = p.reviews.length 
+        ? p.reviews.map(r => `
+            <div class="review">
+              <strong>${r.author}</strong> — ${'⭐'.repeat(r.rating)}<br>
+              <span>${r.comment}</span>
+            </div>
+          `).join('')
+        : '<p>No reviews yet.</p>';
 
-  <script src="app.js"></script>
+      document.getElementById('profileContent').innerHTML = `
+        <h2>${p.name}</h2>
+        <p><strong>${p.role}</strong> • ${p.location}</p>
+        <p>${p.bio || 'No bio provided.'}</p>
+        <hr style="border-color:#334155; margin:16px 0;">
+        <h3>Reviews</h3>
+        ${reviews}
+        <div class="review-form">
+          <h4>Add a Review</h4>
+          <input type="text" id="reviewAuthor" placeholder="Your name">
+          <select id="reviewRating">
+            <option value="5">⭐⭐⭐⭐⭐ (5)</option>
+            <option value="4">⭐⭐⭐⭐ (4)</option>
+            <option value="3">⭐⭐⭐ (3)</option>
+            <option value="2">⭐⭐ (2)</option>
+            <option value="1">⭐ (1)</option>
+          </select>
+          <textarea id="reviewComment" placeholder="Write your review..."></textarea>
+          <button onclick="submitReview('${p.id}')">Submit Review</button>
+        </div>
+      `;
+    }
+
+    // Submit Review
+    async function submitReview(profileId) {
+      const author = document.getElementById('reviewAuthor').value.trim();
+      const rating = parseInt(document.getElementById('reviewRating').value);
+      const comment = document.getElementById('reviewComment').value.trim();
+      if (!author || !comment) { alert('Please fill in all fields'); return; }
+
+      const res = await fetch(`${API}/profiles/${profileId}/reviews`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ author, rating, comment })
+      });
+      if (res.ok) {
+        viewProfile(profileId); // Refresh
+      } else {
+        alert('Failed to submit review');
+      }
+    }
+
+    function showSearch() {
+      document.getElementById('searchView').classList.remove('hidden');
+      document.getElementById('profileView').classList.add('hidden');
+    }
+
+    // Load all on start
+    doSearch();
+  </script>
 </body>
 </html>
