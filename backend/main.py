@@ -1,12 +1,20 @@
-"""People Search API — FastAPI backend with in-memory storage."""
+"""People Search API — FastAPI backend with PostgreSQL database."""
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
-from uuid import uuid4
-from datetime import datetime
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, or_
+from sqlalchemy.orm import selectinload
+from uuid import UUID
 
-app = FastAPI(title="People Search API", version="0.1.0")
+from database import get_db, engine, Base
+from models import Profile, Review
+from schemas import (
+    ProfileCreate, ProfileResponse, ProfileSummary,
+    ReviewCreate, ReviewResponse
+)
+
+app = FastAPI(title="People Search API", version="0.2.0")
 
 # CORS for local frontend development
 app.add_middleware(
@@ -17,119 +25,103 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ---------------------------------------------------------------------------
-# Models
-# ---------------------------------------------------------------------------
 
-class ReviewCreate(BaseModel):
-    author: str = Field(..., min_length=1, max_length=100)
-    rating: int = Field(..., ge=1, le=5)
-    comment: str = Field(..., max_length=1000)
+@app.on_event("startup")
+async def startup():
+    """Create tables on startup (for dev convenience)."""
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
 
-
-class Review(ReviewCreate):
-    id: str
-    created_at: datetime
-
-
-class ProfileCreate(BaseModel):
-    name: str = Field(..., min_length=1, max_length=100)
-    role: str = Field(..., min_length=1, max_length=100)
-    location: str = Field(..., min_length=1, max_length=100)
-    bio: str = Field(default="", max_length=500)
-
-
-class Profile(ProfileCreate):
-    id: str
-    reviews: list[Review] = []
-    created_at: datetime
-
-
-class ProfileSummary(BaseModel):
-    """Lightweight profile for search results."""
-    id: str
-    name: str
-    role: str
-    location: str
-
-
-# ---------------------------------------------------------------------------
-# In-memory storage (replace with database later)
-# ---------------------------------------------------------------------------
-
-PROFILES: dict[str, Profile] = {}
-
-# Seed some sample data
-def _seed_data():
-    samples = [
-        {"name": "Alice Monroe", "role": "Product Designer", "location": "New York, NY", "bio": "Passionate about user-centered design."},
-        {"name": "Bob Chen", "role": "Software Engineer", "location": "San Francisco, CA", "bio": "Full-stack developer with 10 years experience."},
-        {"name": "Carlos Ruiz", "role": "Data Scientist", "location": "Austin, TX", "bio": "ML enthusiast and Python advocate."},
-        {"name": "Denise Patel", "role": "Marketing Lead", "location": "Seattle, WA", "bio": "Growth marketing specialist."},
-        {"name": "Ethan Li", "role": "CTO", "location": "Boston, MA", "bio": "Building scalable systems since 2010."},
-        {"name": "Fiona Gomez", "role": "UX Researcher", "location": "Denver, CO", "bio": "Qualitative research expert."},
-        {"name": "Grace Park", "role": "Designer", "location": "Brooklyn, NY", "bio": "Visual design and branding."},
-        {"name": "Hassan Ali", "role": "Frontend Engineer", "location": "Chicago, IL", "bio": "React and TypeScript specialist."},
-    ]
-    for p in samples:
-        pid = str(uuid4())
-        PROFILES[pid] = Profile(id=pid, created_at=datetime.utcnow(), **p)
-
-_seed_data()
 
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
 
 @app.get("/search", response_model=list[ProfileSummary])
-def search_people(q: str = Query(default="", max_length=100)):
+async def search_people(
+    q: str = Query(default="", max_length=100),
+    db: AsyncSession = Depends(get_db)
+):
     """Search profiles by name, role, or location."""
     query = q.strip().lower()
-    if not query:
-        return [ProfileSummary(**p.model_dump()) for p in PROFILES.values()]
     
-    results = []
-    for p in PROFILES.values():
-        if (query in p.name.lower() 
-            or query in p.role.lower() 
-            or query in p.location.lower()):
-            results.append(ProfileSummary(**p.model_dump()))
-    return results
+    if not query:
+        # Return all profiles
+        result = await db.execute(select(Profile))
+        profiles = result.scalars().all()
+    else:
+        # Filter by name, role, or location (case-insensitive)
+        result = await db.execute(
+            select(Profile).where(
+                or_(
+                    Profile.name.ilike(f"%{query}%"),
+                    Profile.role.ilike(f"%{query}%"),
+                    Profile.location.ilike(f"%{query}%")
+                )
+            )
+        )
+        profiles = result.scalars().all()
+    
+    return profiles
 
 
-@app.post("/profiles", response_model=Profile, status_code=201)
-def create_profile(data: ProfileCreate):
+@app.post("/profiles", response_model=ProfileResponse, status_code=201)
+async def create_profile(
+    data: ProfileCreate,
+    db: AsyncSession = Depends(get_db)
+):
     """Create a new profile."""
-    pid = str(uuid4())
-    profile = Profile(id=pid, created_at=datetime.utcnow(), **data.model_dump())
-    PROFILES[pid] = profile
+    profile = Profile(**data.model_dump())
+    db.add(profile)
+    await db.flush()
+    await db.refresh(profile)
     return profile
 
 
-@app.get("/profiles/{profile_id}", response_model=Profile)
-def get_profile(profile_id: str):
+@app.get("/profiles/{profile_id}", response_model=ProfileResponse)
+async def get_profile(
+    profile_id: UUID,
+    db: AsyncSession = Depends(get_db)
+):
     """Get full profile with reviews."""
-    if profile_id not in PROFILES:
-        raise HTTPException(status_code=404, detail="Profile not found")
-    return PROFILES[profile_id]
-
-
-@app.post("/profiles/{profile_id}/reviews", response_model=Review, status_code=201)
-def add_review(profile_id: str, data: ReviewCreate):
-    """Add a review to a profile."""
-    if profile_id not in PROFILES:
+    result = await db.execute(
+        select(Profile)
+        .options(selectinload(Profile.reviews))
+        .where(Profile.id == profile_id)
+    )
+    profile = result.scalar_one_or_none()
+    
+    if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
     
-    review = Review(
-        id=str(uuid4()),
-        created_at=datetime.utcnow(),
-        **data.model_dump()
+    return profile
+
+
+@app.post("/profiles/{profile_id}/reviews", response_model=ReviewResponse, status_code=201)
+async def add_review(
+    profile_id: UUID,
+    data: ReviewCreate,
+    db: AsyncSession = Depends(get_db)
+):
+    """Add a review to a profile."""
+    # Check profile exists
+    result = await db.execute(
+        select(Profile).where(Profile.id == profile_id)
     )
-    PROFILES[profile_id].reviews.append(review)
+    profile = result.scalar_one_or_none()
+    
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    
+    review = Review(profile_id=profile_id, **data.model_dump())
+    db.add(review)
+    await db.flush()
+    await db.refresh(review)
     return review
 
 
 @app.get("/health")
-def health_check():
+async def health_check():
     """Health check endpoint."""
     return {"status": "ok"}
+
