@@ -34,6 +34,7 @@ class ReviewResponse(BaseModel):
 class ProfileCreate(BaseModel):
     """Schema for creating a profile."""
     name: str = Field(..., min_length=1, max_length=100)
+    company: str = Field(..., min_length=1, max_length=100)
     role: str = Field(..., min_length=1, max_length=100)
     location: str = Field(..., min_length=1, max_length=100)
     bio: str = Field(default="", max_length=500)
@@ -43,6 +44,7 @@ class ProfileSummary(BaseModel):
     """Lightweight profile for search results."""
     id: UUID
     name: str
+    company: str
     role: str
     location: str
 
@@ -53,6 +55,7 @@ class ProfileResponse(BaseModel):
     """Full profile with reviews."""
     id: UUID
     name: str
+    company: str
     role: str
     location: str
     bio: str

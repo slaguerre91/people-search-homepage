@@ -35,9 +35,10 @@
   <!-- Search View -->
   <div id="searchView">
     <div class="search-box">
-      <input type="text" id="searchInput" placeholder="Search by name, role, or location...">
+      <input type="text" id="searchInput" placeholder="Try: John Smith Oracle, Sarah Google, Microsoft...">
       <button onclick="doSearch()">Search</button>
     </div>
+    <p style="color:#64748b; font-size:13px; margin-top:-12px;">Search by name and company (e.g., "John Smith, Oracle" or "John Oracle")</p>
     <div id="results" class="results"></div>
   </div>
 
@@ -67,7 +68,8 @@
       el.innerHTML = people.map(p => `
         <div class="card" onclick="viewProfile('${p.id}')">
           <h3>${p.name}</h3>
-          <p>${p.role} • ${p.location}</p>
+          <p><strong>${p.company}</strong> • ${p.role}</p>
+          <p style="font-size:12px; color:#64748b;">${p.location}</p>
         </div>
       `).join('');
     }
@@ -94,6 +96,7 @@
 
       document.getElementById('profileContent').innerHTML = `
         <h2>${p.name}</h2>
+        <p style="font-size:18px; color:#60a5fa;">${p.company}</p>
         <p><strong>${p.role}</strong> • ${p.location}</p>
         <p>${p.bio || 'No bio provided.'}</p>
         <hr style="border-color:#334155; margin:16px 0;">

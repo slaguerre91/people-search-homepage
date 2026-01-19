@@ -1,9 +1,13 @@
 """People Search API — FastAPI backend with PostgreSQL database."""
 
+# Load environment variables from .env file (must be before other imports)
+from dotenv import load_dotenv
+load_dotenv()
+
 from fastapi import FastAPI, HTTPException, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, or_
+from sqlalchemy import select, or_, and_
 from sqlalchemy.orm import selectinload
 from uuid import UUID
 
@@ -13,8 +17,9 @@ from schemas import (
     ProfileCreate, ProfileResponse, ProfileSummary,
     ReviewCreate, ReviewResponse
 )
+from query_parser import parse_search_query, ParsedQuery
 
-app = FastAPI(title="People Search API", version="0.2.0")
+app = FastAPI(title="People Search API", version="0.3.0")
 
 # CORS for local frontend development
 app.add_middleware(
@@ -39,30 +44,64 @@ async def startup():
 
 @app.get("/search", response_model=list[ProfileSummary])
 async def search_people(
-    q: str = Query(default="", max_length=100),
+    q: str = Query(default="", max_length=200),
     db: AsyncSession = Depends(get_db)
 ):
-    """Search profiles by name, role, or location."""
-    query = q.strip().lower()
-    
-    if not query:
+    """
+    Search profiles by name and/or company.
+    Uses ChatGPT to parse queries like "John Smith, Oracle" or "John Smith Oracle".
+    """
+    if not q.strip():
         # Return all profiles
-        result = await db.execute(select(Profile))
+        result = await db.execute(select(Profile).limit(50))
         profiles = result.scalars().all()
+        return profiles
+    
+    # Parse the query using OpenAI
+    parsed = await parse_search_query(q)
+    
+    # Build query conditions based on parsed result
+    conditions = []
+    
+    if parsed.name:
+        conditions.append(Profile.name.ilike(f"%{parsed.name}%"))
+    
+    if parsed.company:
+        conditions.append(Profile.company.ilike(f"%{parsed.company}%"))
+    
+    if conditions:
+        if parsed.name and parsed.company:
+            # Both name AND company must match
+            result = await db.execute(
+                select(Profile).where(and_(*conditions))
+            )
+        else:
+            # Just one condition
+            result = await db.execute(
+                select(Profile).where(conditions[0])
+            )
     else:
-        # Filter by name, role, or location (case-insensitive)
+        # Fallback: search all text fields with raw query
+        raw = parsed.raw_query.lower()
         result = await db.execute(
             select(Profile).where(
                 or_(
-                    Profile.name.ilike(f"%{query}%"),
-                    Profile.role.ilike(f"%{query}%"),
-                    Profile.location.ilike(f"%{query}%")
+                    Profile.name.ilike(f"%{raw}%"),
+                    Profile.company.ilike(f"%{raw}%"),
+                    Profile.role.ilike(f"%{raw}%"),
+                    Profile.location.ilike(f"%{raw}%")
                 )
             )
         )
-        profiles = result.scalars().all()
     
+    profiles = result.scalars().all()
     return profiles
+
+
+@app.get("/search/parse")
+async def parse_query(q: str = Query(..., max_length=200)) -> ParsedQuery:
+    """Debug endpoint to see how a query is parsed."""
+    return await parse_search_query(q)
 
 
 @app.post("/profiles", response_model=ProfileResponse, status_code=201)
