@@ -18,8 +18,9 @@ from schemas import (
     ReviewCreate, ReviewResponse
 )
 from query_parser import parse_search_query, ParsedQuery
+from linkedin_search import search_linkedin, LinkedInSearchResult
 
-app = FastAPI(title="People Search API", version="0.3.0")
+app = FastAPI(title="People Search API", version="0.4.0")
 
 # CORS for local frontend development
 app.add_middleware(
@@ -157,6 +158,21 @@ async def add_review(
     await db.flush()
     await db.refresh(review)
     return review
+
+
+@app.get("/search/linkedin", response_model=LinkedInSearchResult)
+async def linkedin_search(
+    q: str = Query(..., min_length=1, max_length=200)
+):
+    """
+    Search for LinkedIn profiles using DuckDuckGo (free, no API key).
+    Returns parsed profile information.
+    """
+    try:
+        result = await search_linkedin(q, max_results=20)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/health")
