@@ -129,13 +129,13 @@
       // Search DB first, then decide on LinkedIn
       const found = await searchDatabase(q);
       if (!found) {
-        // If no DB results, auto-trigger LinkedIn search
+        // If no DB results, auto-trigger LinkedIn search and reset results
         linkedinSection.classList.remove('hidden');
         linkedinCount.textContent = '...';
         linkedinResults.innerHTML = '<div class="loading">🔍 Searching LinkedIn...</div>';
         await searchLinkedIn(q);
       } else {
-        // If DB results found, show LinkedIn prompt and manual button
+        // If DB results found, show LinkedIn prompt and manual button (empty by default)
         linkedinSection.classList.remove('hidden');
         linkedinCount.textContent = '0';
         linkedinResults.innerHTML = `
@@ -344,11 +344,11 @@
 
     searchInput.addEventListener('input', async function(e) {
       const q = searchInput.value.trim();
+      // Always trigger autocomplete, even on backspace
       if (!q) {
         removeAutocomplete();
         return;
       }
-      // Fetch autocomplete suggestions
       try {
         const res = await fetch(`${API}/search/autocomplete?q=${encodeURIComponent(q)}`);
         const suggestions = await res.json();
