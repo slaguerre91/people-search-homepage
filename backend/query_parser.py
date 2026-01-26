@@ -17,13 +17,38 @@ class ParsedQuery(BaseModel):
     raw_query: str
 
 
-# Known company names for fast matching (add more as needed)
+# Known company names for fast matching (top 100 + tech companies)
 KNOWN_COMPANIES = {
-    "google", "microsoft", "apple", "amazon", "meta", "facebook", "netflix",
-    "oracle", "ibm", "intel", "cisco", "salesforce", "adobe", "nvidia",
+    # Tech giants
+    "google", "alphabet", "microsoft", "apple", "amazon", "meta", "facebook", 
+    "netflix", "oracle", "ibm", "intel", "cisco", "salesforce", "adobe", "nvidia",
     "tesla", "uber", "lyft", "airbnb", "spotify", "twitter", "x", "linkedin",
-    "stripe", "square", "shopify", "zoom", "slack", "dropbox", "github",
+    "stripe", "square", "block", "shopify", "zoom", "slack", "dropbox", "github",
     "openai", "anthropic", "databricks", "snowflake", "palantir", "coinbase",
+    "samsung", "sony", "dell", "hp", "lenovo", "qualcomm", "broadcom", "amd",
+    "vmware", "servicenow", "workday", "splunk", "docusign", "twilio", "atlassian",
+    
+    # Fortune 100 / Major employers
+    "walmart", "exxon", "exxonmobil", "chevron", "berkshire", "unitedhealth",
+    "mckesson", "cvs", "amerisource", "costco", "cigna", "marathon", "phillips",
+    "valero", "kroger", "walgreens", "homedepot", "home depot", "jpmorgan", 
+    "chase", "bank of america", "bofa", "citi", "citibank", "wells fargo",
+    "fannie mae", "verizon", "att", "at&t", "comcast", "target", "lowes", "lowe's",
+    "ups", "fedex", "boeing", "lockheed", "raytheon", "northrop", "general dynamics",
+    "ford", "gm", "general motors", "chrysler", "stellantis", "toyota", "honda",
+    "humana", "centene", "elevance", "cardinal", "abbvie", "pfizer", "johnson",
+    "merck", "bristol", "eli lilly", "lilly", "amgen", "gilead", "regeneron",
+    "procter", "p&g", "unilever", "pepsi", "pepsico", "coca-cola", "coke",
+    "tyson", "sysco", "kraft", "general mills", "kellogg", "mondelez",
+    "disney", "warner", "paramount", "fox", "nbc", "universal", "paramount",
+    "morgan stanley", "goldman", "blackrock", "fidelity", "schwab", "state street",
+    "american express", "amex", "visa", "mastercard", "paypal", "capital one",
+    "prudential", "metlife", "aig", "allstate", "progressive", "travelers",
+    "delta", "united airlines", "american airlines", "southwest", "jetblue",
+    "hilton", "marriott", "hyatt", "mgm", "wynn", "starbucks", "mcdonalds",
+    "nike", "adidas", "under armour", "lululemon", "gap", "nordstrom", "macys",
+    "caterpillar", "deere", "john deere", "3m", "honeywell", "ge", "siemens",
+    "accenture", "deloitte", "pwc", "kpmg", "ey", "mckinsey", "bain", "bcg",
 }
 
 # Initialize OpenAI client only if API key is available
