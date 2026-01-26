@@ -337,8 +337,72 @@
       document.getElementById('profileView').classList.add('hidden');
     }
 
-    // Load saved profiles on start
-    searchDatabase('');
+    // --- Autocomplete logic ---
+    const searchInput = document.getElementById('searchInput');
+    let autocompleteBox = null;
+    let autocompleteResults = [];
+
+    searchInput.addEventListener('input', async function(e) {
+      const q = searchInput.value.trim();
+      if (!q) {
+        removeAutocomplete();
+        return;
+      }
+      // Fetch autocomplete suggestions
+      try {
+        const res = await fetch(`${API}/search/autocomplete?q=${encodeURIComponent(q)}`);
+        const suggestions = await res.json();
+        autocompleteResults = suggestions;
+        showAutocomplete(suggestions);
+      } catch {
+        removeAutocomplete();
+      }
+    });
+
+    searchInput.addEventListener('blur', () => {
+      setTimeout(removeAutocomplete, 150); // Delay to allow click
+    });
+
+    function showAutocomplete(suggestions) {
+      removeAutocomplete();
+      if (!suggestions.length) return;
+      autocompleteBox = document.createElement('div');
+      autocompleteBox.className = 'autocomplete-box';
+      autocompleteBox.style.position = 'absolute';
+      autocompleteBox.style.background = '#1e293b';
+      autocompleteBox.style.color = '#e2e8f0';
+      autocompleteBox.style.border = '1px solid #334155';
+      autocompleteBox.style.borderRadius = '6px';
+      autocompleteBox.style.zIndex = 1000;
+      autocompleteBox.style.width = searchInput.offsetWidth + 'px';
+      autocompleteBox.style.left = searchInput.getBoundingClientRect().left + window.scrollX + 'px';
+      autocompleteBox.style.top = (searchInput.getBoundingClientRect().bottom + window.scrollY) + 'px';
+      autocompleteBox.innerHTML = suggestions.map((s, i) => `
+        <div class="autocomplete-item" style="padding:10px; cursor:pointer; border-bottom:1px solid #334155;" data-idx="${i}">
+          <strong>${s.name}</strong> <span style="color:#60a5fa;">${s.role}</span><br>
+          <span style="font-size:13px; color:#94a3b8;">${s.company} • ${s.location}</span>
+        </div>
+      `).join('');
+      document.body.appendChild(autocompleteBox);
+      // Click handler
+      autocompleteBox.querySelectorAll('.autocomplete-item').forEach(item => {
+        item.addEventListener('mousedown', function(e) {
+          const idx = +item.getAttribute('data-idx');
+          if (autocompleteResults[idx]) {
+            searchInput.value = autocompleteResults[idx].name;
+            removeAutocomplete();
+            doSearch();
+          }
+        });
+      });
+    }
+
+    function removeAutocomplete() {
+      if (autocompleteBox) {
+        autocompleteBox.remove();
+        autocompleteBox = null;
+      }
+    }
   </script>
 </body>
 </html>

@@ -1,3 +1,30 @@
+# --- Autocomplete endpoint ---
+from fastapi import Response
+
+@app.get("/search/autocomplete")
+async def autocomplete_names(q: str = Query(default="", max_length=100), db: AsyncSession = Depends(get_db)):
+    """
+    Return up to 8 profiles where name starts with the given prefix (case-insensitive).
+    Used for autocomplete suggestions.
+    """
+    if not q.strip():
+        return []
+    result = await db.execute(
+        select(Profile)
+        .where(Profile.name.ilike(f"{q}%"))
+        .limit(8)
+    )
+    profiles = result.scalars().all()
+    # Return only preview fields
+    return [
+        {
+            "id": str(p.id),
+            "name": p.name,
+            "role": p.role,
+            "company": p.company,
+            "location": p.location
+        } for p in profiles
+    ]
 """People Search API — FastAPI backend with PostgreSQL database."""
 
 # Load environment variables from .env file (must be before other imports)
