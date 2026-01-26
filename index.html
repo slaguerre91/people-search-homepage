@@ -388,10 +388,9 @@
       autocompleteBox.querySelectorAll('.autocomplete-item').forEach(item => {
         item.addEventListener('mousedown', function(e) {
           const idx = +item.getAttribute('data-idx');
-          if (autocompleteResults[idx]) {
-            searchInput.value = autocompleteResults[idx].name;
+          if (autocompleteResults[idx] && autocompleteResults[idx].id) {
             removeAutocomplete();
-            doSearch();
+            viewProfile(autocompleteResults[idx].id);
           }
         });
       });
