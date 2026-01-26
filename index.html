@@ -9,14 +9,14 @@
     body { font-family: system-ui, sans-serif; max-width: 800px; margin: 40px auto; padding: 20px; background: #0f172a; color: #e2e8f0; }
     h1 { color: #60a5fa; }
     .search-box { display: flex; gap: 8px; margin-bottom: 20px; }
-    input, button { padding: 10px 14px; font-size: 16px; border: none; border-radius: 6px; }
+    input, button { padding: 12px 16px; font-size: 16px; border: none; border-radius: 6px; }
     input { flex: 1; background: #1e293b; color: #e2e8f0; }
-    button { background: #3b82f6; color: white; cursor: pointer; }
+    input:focus { outline: 2px solid #3b82f6; }
+    button { background: #3b82f6; color: white; cursor: pointer; font-weight: 500; }
     button:hover { background: #2563eb; }
-    .linkedin-btn { background: #0077b5; }
-    .linkedin-btn:hover { background: #005885; }
+    button:disabled { background: #475569; cursor: not-allowed; }
     .results { display: grid; gap: 12px; }
-    .card { background: #1e293b; padding: 16px; border-radius: 8px; cursor: pointer; }
+    .card { background: #1e293b; padding: 16px; border-radius: 8px; cursor: pointer; transition: background 0.2s; }
     .card:hover { background: #334155; }
     .card h3 { margin: 0 0 4px; color: #60a5fa; }
     .card p { margin: 0; color: #94a3b8; font-size: 14px; }
@@ -28,20 +28,37 @@
     .review-form textarea { min-height: 60px; resize: vertical; padding: 10px; border-radius: 6px; border: none; }
     .back-btn { background: #475569; margin-bottom: 16px; }
     .hidden { display: none; }
-    .status { color: #fbbf24; margin: 10px 0; }
-    .section-title { color: #94a3b8; font-size: 14px; margin: 20px 0 10px; text-transform: uppercase; letter-spacing: 1px; }
-    .linkedin-card { background: #1e293b; padding: 16px; border-radius: 8px; border-left: 3px solid #0077b5; }
+    
+    /* Section styling */
+    .section { margin-bottom: 24px; }
+    .section-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #334155; }
+    .section-title { color: #94a3b8; font-size: 13px; text-transform: uppercase; letter-spacing: 1px; margin: 0; }
+    .section-icon { font-size: 16px; }
+    .section-count { background: #334155; color: #94a3b8; font-size: 11px; padding: 2px 8px; border-radius: 10px; margin-left: auto; }
+    
+    /* Empty state */
+    .empty-state { background: #1e293b; padding: 20px; border-radius: 8px; text-align: center; color: #64748b; }
+    .empty-state .icon { font-size: 32px; margin-bottom: 8px; }
+    
+    /* Loading */
+    .loading { color: #fbbf24; padding: 20px; text-align: center; background: #1e293b; border-radius: 8px; }
+    
+    /* LinkedIn cards */
+    .linkedin-card { background: #1e293b; padding: 16px; border-radius: 8px; border-left: 3px solid #0077b5; transition: background 0.2s; }
     .linkedin-card:hover { background: #334155; }
     .linkedin-card h3 { margin: 0 0 4px; }
     .linkedin-card h3 a { color: #0077b5; text-decoration: none; }
     .linkedin-card h3 a:hover { text-decoration: underline; }
     .linkedin-card p { margin: 4px 0 0; color: #94a3b8; font-size: 14px; }
-    .loading { color: #fbbf24; padding: 20px; text-align: center; }
+    
+    /* Match badges */
     .match-badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; margin-left: 8px; }
     .match-high { background: #22c55e; color: white; }
     .match-medium { background: #f59e0b; color: white; }
     .match-low { background: #6b7280; color: white; }
-    .parsed-info { font-size: 12px; color: #64748b; margin-bottom: 12px; padding: 8px; background: #1e293b; border-radius: 6px; }
+    
+    /* Parsed info */
+    .parsed-info { font-size: 12px; color: #64748b; margin-bottom: 12px; padding: 8px 12px; background: #1e293b; border-radius: 6px; display: flex; align-items: center; gap: 8px; }
   </style>
 </head>
 <body>
@@ -50,16 +67,27 @@
   <!-- Search View -->
   <div id="searchView">
     <div class="search-box">
-      <input type="text" id="searchInput" placeholder="Name, company, or paste LinkedIn URL...">
-      <button onclick="doSearch()">Search DB</button>
-      <button class="linkedin-btn" onclick="searchLinkedIn()">🔗 LinkedIn</button>
+      <input type="text" id="searchInput" placeholder="Search by name, company, or paste LinkedIn URL..." onkeydown="if(event.key==='Enter')doSearch()">
+      <button id="searchBtn" onclick="doSearch()">Search</button>
     </div>
-    <p style="color:#64748b; font-size:13px; margin-top:-12px;">Search by name & company, or paste a LinkedIn URL directly.</p>
-    <div id="results" class="results"></div>
-    
+
+    <!-- Database Results Section -->
+    <div id="dbSection" class="section hidden">
+      <div class="section-header">
+        <span class="section-icon">📁</span>
+        <p class="section-title">Saved Profiles</p>
+        <span id="dbCount" class="section-count">0</span>
+      </div>
+      <div id="dbResults" class="results"></div>
+    </div>
+
     <!-- LinkedIn Results Section -->
-    <div id="linkedinSection" class="hidden">
-      <p class="section-title">🔗 LinkedIn Results</p>
+    <div id="linkedinSection" class="section hidden">
+      <div class="section-header">
+        <span class="section-icon">🔗</span>
+        <p class="section-title">LinkedIn Matches</p>
+        <span id="linkedinCount" class="section-count">0</span>
+      </div>
       <div id="linkedinResults" class="results"></div>
     </div>
   </div>
@@ -73,27 +101,154 @@
   <script>
     const API = 'http://localhost:8000';
 
-    // Search
+    // Main unified search
     async function doSearch() {
-      const q = document.getElementById('searchInput').value;
-      const res = await fetch(`${API}/search?q=${encodeURIComponent(q)}`);
-      const people = await res.json();
-      renderResults(people);
-    }
+      const q = document.getElementById('searchInput').value.trim();
+      const btn = document.getElementById('searchBtn');
+      
+      // Clear previous results
+      document.getElementById('dbSection').classList.add('hidden');
+      document.getElementById('linkedinSection').classList.add('hidden');
 
-    function renderResults(people) {
-      const el = document.getElementById('results');
-      if (!people.length) {
-        el.innerHTML = '<p>No results found.</p>';
+      if (!q) {
+        // Show all DB profiles if no query
+        await searchDatabase('');
         return;
       }
-      el.innerHTML = people.map(p => `
-        <div class="card" onclick="viewProfile('${p.id}')">
-          <h3>${p.name}</h3>
-          <p><strong>${p.company}</strong> • ${p.role}</p>
-          <p style="font-size:12px; color:#64748b;">${p.location}</p>
-        </div>
-      `).join('');
+
+      // Disable button during search
+      btn.disabled = true;
+      btn.textContent = 'Searching...';
+      const linkedinSection = document.getElementById('linkedinSection');
+      const linkedinResults = document.getElementById('linkedinResults');
+      const linkedinCount = document.getElementById('linkedinCount');
+      linkedinSection.classList.add('hidden');
+      linkedinCount.textContent = '0';
+      linkedinResults.innerHTML = '';
+
+      // Always search both DB and LinkedIn in parallel
+      await Promise.all([
+        searchDatabase(q),
+        (async () => {
+          linkedinSection.classList.remove('hidden');
+          linkedinCount.textContent = '...';
+          linkedinResults.innerHTML = '<div class="loading">🔍 Searching LinkedIn...</div>';
+          await searchLinkedIn(q);
+        })()
+      ]);
+
+      btn.disabled = false;
+      btn.textContent = 'Search';
+    }
+
+    // Database search
+    async function searchDatabase(q) {
+      const section = document.getElementById('dbSection');
+      const resultsEl = document.getElementById('dbResults');
+      const countEl = document.getElementById('dbCount');
+      
+      try {
+        const res = await fetch(`${API}/search?q=${encodeURIComponent(q)}`);
+        const people = await res.json();
+        section.classList.remove('hidden');
+        countEl.textContent = people.length;
+        if (!people.length) {
+          resultsEl.innerHTML = `
+            <div class="empty-state">
+              <div class="icon">📭</div>
+              <p>No saved profiles found${q ? ` for "${q}"` : ''}</p>
+            </div>
+          `;
+          return false;
+        }
+        resultsEl.innerHTML = people.map(p => `
+          <div class="card" onclick="viewProfile('${p.id}')">
+            <h3>${p.name}</h3>
+            <p><strong>${p.company}</strong> • ${p.role}</p>
+            <p style="font-size:12px; color:#64748b;">${p.location}</p>
+          </div>
+        `).join('');
+        return true;
+      } catch (err) {
+        section.classList.remove('hidden');
+        resultsEl.innerHTML = `<p style="color:#ef4444;">Error loading profiles</p>`;
+        return false;
+      }
+    }
+    // Manual LinkedIn search trigger (must be global for button onclick)
+    // (manualLinkedInSearch removed, not needed in this version)
+    // LinkedIn search
+    async function searchLinkedIn(q) {
+      const section = document.getElementById('linkedinSection');
+      const resultsEl = document.getElementById('linkedinResults');
+      const countEl = document.getElementById('linkedinCount');
+      
+      try {
+        const res = await fetch(`${API}/search/linkedin?q=${encodeURIComponent(q)}`);
+        if (!res.ok) throw new Error('Search failed');
+        const data = await res.json();
+        
+        countEl.textContent = data.profiles.length;
+        renderLinkedInResults(data.profiles, data.parsed_name, data.parsed_company);
+      } catch (err) {
+        countEl.textContent = '0';
+        resultsEl.innerHTML = `
+          <div class="empty-state">
+            <div class="icon">⚠️</div>
+            <p>Could not search LinkedIn</p>
+          </div>
+        `;
+      }
+    }
+
+    function renderLinkedInResults(profiles, parsedName, parsedCompany) {
+      const el = document.getElementById('linkedinResults');
+      
+      if (!profiles.length) {
+        el.innerHTML = `
+          <div class="empty-state">
+            <div class="icon">🔍</div>
+            <p>No LinkedIn profiles found</p>
+          </div>
+        `;
+        return;
+      }
+      
+      // Show what was parsed from the query
+      let parsedInfo = '';
+      if (parsedName || parsedCompany) {
+        const parts = [];
+        if (parsedName) parts.push(`<strong>Name:</strong> ${parsedName}`);
+        if (parsedCompany) parts.push(`<strong>Company:</strong> ${parsedCompany}`);
+        parsedInfo = `<div class="parsed-info">🎯 Searching for: ${parts.join(' • ')}</div>`;
+      }
+      
+      const cards = profiles.map(p => {
+        let badgeClass = 'match-low';
+        let badgeText = 'Low';
+        if (p.match_score >= 70) {
+          badgeClass = 'match-high';
+          badgeText = 'Strong';
+        } else if (p.match_score >= 50) {
+          badgeClass = 'match-medium';
+          badgeText = 'Partial';
+        }
+        
+        const scoreBadge = p.match_score > 0 
+          ? `<span class="match-badge ${badgeClass}">${badgeText} ${p.match_score}%</span>` 
+          : '';
+        
+        return `
+          <div class="linkedin-card">
+            <h3><a href="${p.url}" target="_blank">${p.name}</a>${scoreBadge}</h3>
+            <p>${p.title || 'LinkedIn Member'}</p>
+            ${p.location ? `<p style="font-size:12px;">${p.location}</p>` : ''}
+            ${p.snippet ? `<p style="font-size:12px; color:#64748b; margin-top:8px;">${p.snippet}</p>` : ''}
+          </div>
+        `;
+      }).join('');
+      
+      el.innerHTML = parsedInfo + cards;
     }
 
     // View Profile
@@ -127,7 +282,7 @@
         <div class="review-form">
           <h4>Add a Review</h4>
           <input type="text" id="reviewAuthor" placeholder="Your name">
-          <select id="reviewRating">
+          <select id="reviewRating" style="padding:10px; background:#0f172a; color:#e2e8f0; border:none; border-radius:6px;">
             <option value="5">⭐⭐⭐⭐⭐ (5)</option>
             <option value="4">⭐⭐⭐⭐ (4)</option>
             <option value="3">⭐⭐⭐ (3)</option>
@@ -153,7 +308,7 @@
         body: JSON.stringify({ author, rating, comment })
       });
       if (res.ok) {
-        viewProfile(profileId); // Refresh
+        viewProfile(profileId);
       } else {
         alert('Failed to submit review');
       }
@@ -164,75 +319,8 @@
       document.getElementById('profileView').classList.add('hidden');
     }
 
-    // LinkedIn Search
-    async function searchLinkedIn() {
-      const q = document.getElementById('searchInput').value.trim();
-      if (!q) { alert('Enter a search term first'); return; }
-      
-      const section = document.getElementById('linkedinSection');
-      const resultsEl = document.getElementById('linkedinResults');
-      
-      // Show loading
-      section.classList.remove('hidden');
-      resultsEl.innerHTML = '<div class="loading">🔍 Searching LinkedIn...</div>';
-      
-      try {
-        const res = await fetch(`${API}/search/linkedin?q=${encodeURIComponent(q)}`);
-        if (!res.ok) throw new Error('Search failed');
-        const data = await res.json();
-        renderLinkedInResults(data.profiles, data.parsed_name, data.parsed_company);
-      } catch (err) {
-        resultsEl.innerHTML = `<p style="color:#ef4444;">Error: ${err.message}</p>`;
-      }
-    }
-    
-    function renderLinkedInResults(profiles, parsedName, parsedCompany) {
-      const el = document.getElementById('linkedinResults');
-      if (!profiles.length) {
-        el.innerHTML = '<p>No LinkedIn profiles found.</p>';
-        return;
-      }
-      
-      // Show what was parsed from the query
-      let parsedInfo = '';
-      if (parsedName || parsedCompany) {
-        const parts = [];
-        if (parsedName) parts.push(`<strong>Name:</strong> ${parsedName}`);
-        if (parsedCompany) parts.push(`<strong>Company:</strong> ${parsedCompany}`);
-        parsedInfo = `<div class="parsed-info">🎯 Searching for: ${parts.join(' • ')}</div>`;
-      }
-      
-      const cards = profiles.map(p => {
-        // Determine badge class based on score
-        let badgeClass = 'match-low';
-        let badgeText = 'Low';
-        if (p.match_score >= 70) {
-          badgeClass = 'match-high';
-          badgeText = 'Strong';
-        } else if (p.match_score >= 50) {
-          badgeClass = 'match-medium';
-          badgeText = 'Partial';
-        }
-        
-        const scoreBadge = p.match_score > 0 
-          ? `<span class="match-badge ${badgeClass}">${badgeText} ${p.match_score}%</span>` 
-          : '';
-        
-        return `
-          <div class="linkedin-card">
-            <h3><a href="${p.url}" target="_blank">${p.name}</a>${scoreBadge}</h3>
-            <p>${p.title || 'LinkedIn Member'}</p>
-            ${p.location ? `<p style="font-size:12px;">${p.location}</p>` : ''}
-            ${p.snippet ? `<p style="font-size:12px; color:#64748b; margin-top:8px;">${p.snippet}</p>` : ''}
-          </div>
-        `;
-      }).join('');
-      
-      el.innerHTML = parsedInfo + cards;
-    }
-
-    // Load all on start
-    doSearch();
+    // Load saved profiles on start
+    searchDatabase('');
   </script>
 </body>
 </html>
