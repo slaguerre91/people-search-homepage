@@ -126,17 +126,26 @@
       linkedinCount.textContent = '0';
       linkedinResults.innerHTML = '';
 
-      // Always search both DB and LinkedIn in parallel
-      await Promise.all([
-        searchDatabase(q),
-        (async () => {
-          linkedinSection.classList.remove('hidden');
-          linkedinCount.textContent = '...';
-          linkedinResults.innerHTML = '<div class="loading">🔍 Searching LinkedIn...</div>';
-          await searchLinkedIn(q);
-        })()
-      ]);
-
+      // Search DB first, then decide on LinkedIn
+      const found = await searchDatabase(q);
+      if (!found) {
+        // If no DB results, auto-trigger LinkedIn search
+        linkedinSection.classList.remove('hidden');
+        linkedinCount.textContent = '...';
+        linkedinResults.innerHTML = '<div class="loading">🔍 Searching LinkedIn...</div>';
+        await searchLinkedIn(q);
+      } else {
+        // If DB results found, show LinkedIn prompt and manual button
+        linkedinSection.classList.remove('hidden');
+        linkedinCount.textContent = '0';
+        linkedinResults.innerHTML = `
+          <div class="empty-state">
+            <div class="icon">🔗</div>
+            <p>Didn't find the person you are looking for?</p>
+            <button id="linkedinManualBtn" style="margin-top:12px; padding:10px 18px; background:#0077b5; color:white; border:none; border-radius:6px; font-size:15px; cursor:pointer;" onclick="manualLinkedInSearch()">Search on LinkedIn</button>
+          </div>
+        `;
+      }
       btn.disabled = false;
       btn.textContent = 'Search';
     }
@@ -176,7 +185,16 @@
       }
     }
     // Manual LinkedIn search trigger (must be global for button onclick)
-    // (manualLinkedInSearch removed, not needed in this version)
+    function manualLinkedInSearch() {
+      const q = document.getElementById('searchInput').value.trim();
+      const linkedinSection = document.getElementById('linkedinSection');
+      const linkedinResults = document.getElementById('linkedinResults');
+      const linkedinCount = document.getElementById('linkedinCount');
+      linkedinSection.classList.remove('hidden');
+      linkedinCount.textContent = '...';
+      linkedinResults.innerHTML = '<div class="loading">🔍 Searching LinkedIn...</div>';
+      searchLinkedIn(q);
+    }
     // LinkedIn search
     async function searchLinkedIn(q) {
       const section = document.getElementById('linkedinSection');
