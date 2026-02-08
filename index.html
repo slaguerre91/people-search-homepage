@@ -62,7 +62,36 @@
   </style>
 </head>
 <body>
-  <h1>🔍 People Search</h1>
+
+  <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:24px;">
+    <h1>🔍 People Search</h1>
+    <a href="signup.html" style="background:#334155; color:#e2e8f0; padding:10px 18px; border:none; border-radius:6px; font-size:15px; cursor:pointer; text-decoration:none; display:inline-block;">Sign Up</a>
+    <a href="login.html" style="background:#334155; color:#e2e8f0; padding:10px 18px; border:none; border-radius:6px; font-size:15px; cursor:pointer; text-decoration:none; display:inline-block; margin-left:8px;">Sign In</a>
+  </div>
+
+  <!-- Auth Page (hidden by default) -->
+  <div id="authPage" class="hidden" style="max-width:400px; margin:40px auto; background:#1e293b; padding:32px 24px; border-radius:10px; box-shadow:0 2px 16px #0002;">
+    <h2 style="color:#60a5fa; margin-top:0;">Sign In</h2>
+    <form id="loginForm" onsubmit="return handleLogin(event)">
+      <input type="email" id="loginEmail" placeholder="Email" required style="width:100%;margin-bottom:10px;">
+      <input type="password" id="loginPassword" placeholder="Password" required style="width:100%;margin-bottom:10px;">
+      <button type="submit" style="width:100%;background:#3b82f6;">Sign In</button>
+    </form>
+    <hr style="margin:24px 0; border-color:#334155;">
+    <h2 style="color:#60a5fa;">Sign Up</h2>
+    <form id="signupForm" onsubmit="return handleSignup(event)">
+      <input type="email" id="signupEmail" placeholder="Email" required style="width:100%;margin-bottom:10px;">
+      <input type="text" id="signupFirstName" placeholder="First Name" required style="width:100%;margin-bottom:10px;">
+      <input type="text" id="signupLastName" placeholder="Last Name" required style="width:100%;margin-bottom:10px;">
+      <input type="password" id="signupPassword" placeholder="Password" required style="width:100%;margin-bottom:10px;">
+      <input type="url" id="signupAvatar" placeholder="Avatar URL (optional)" style="width:100%;margin-bottom:10px;">
+      <button type="submit" style="width:100%;background:#3b82f6;">Sign Up</button>
+    </form>
+    <button onclick="hideAuthPage()" style="margin-top:18px; background:#475569; width:100%;">Back to Search</button>
+  </div>
+
+  <!-- Login/Signup Modal (hidden by default) -->
+  <!-- Modal removed -->
 
   <!-- Search View -->
   <div id="searchView">
@@ -129,44 +158,24 @@
       // Search DB first, then decide on LinkedIn
       const found = await searchDatabase(q);
       if (!found) {
-        // If no DB results, auto-trigger LinkedIn search and reset results
+        // If no DB results, auto-trigger LinkedIn search
         linkedinSection.classList.remove('hidden');
         linkedinCount.textContent = '...';
         linkedinResults.innerHTML = '<div class="loading">🔍 Searching LinkedIn...</div>';
         await searchLinkedIn(q);
       } else {
-        // If DB results found, show LinkedIn prompt and manual button (empty by default)
+        // If DB results found, show LinkedIn prompt and manual button
         linkedinSection.classList.remove('hidden');
         linkedinCount.textContent = '0';
         linkedinResults.innerHTML = `
           <div class="empty-state">
             <div class="icon">🔗</div>
             <p>Didn't find the person you are looking for?</p>
-            <button id="linkedinManualBtn" style="margin-top:12px; padding:10px 18px; background:#0077b5; color:white; border:none; border-radius:6px; font-size:15px; cursor:pointer;" onclick="manualLinkedInSearch()">Search on LinkedIn</button>
-          </div>
-        `;
+                <!-- Auth UI removed -->
       }
       btn.disabled = false;
       btn.textContent = 'Search';
-    }
-
-    // Database search
-    async function searchDatabase(q) {
-      const section = document.getElementById('dbSection');
-      const resultsEl = document.getElementById('dbResults');
-      const countEl = document.getElementById('dbCount');
-      
-      try {
-        const res = await fetch(`${API}/search?q=${encodeURIComponent(q)}`);
-        const people = await res.json();
-        section.classList.remove('hidden');
-        countEl.textContent = people.length;
-        if (!people.length) {
-          resultsEl.innerHTML = `
-            <div class="empty-state">
-              <div class="icon">📭</div>
-              <p>No saved profiles found${q ? ` for "${q}"` : ''}</p>
-            </div>
+              <!-- Auth Page removed -->
           `;
           return false;
         }
@@ -297,9 +306,8 @@
         <hr style="border-color:#334155; margin:16px 0;">
         <h3>Reviews</h3>
         ${reviews}
-        <div class="review-form">
+        <form class="review-form" id="reviewForm" onsubmit="event.preventDefault(); submitReview('${p.id}');">
           <h4>Add a Review</h4>
-          <input type="text" id="reviewAuthor" placeholder="Your name">
           <select id="reviewRating" style="padding:10px; background:#0f172a; color:#e2e8f0; border:none; border-radius:6px;">
             <option value="5">⭐⭐⭐⭐⭐ (5)</option>
             <option value="4">⭐⭐⭐⭐ (4)</option>
@@ -308,8 +316,8 @@
             <option value="1">⭐ (1)</option>
           </select>
           <textarea id="reviewComment" placeholder="Write your review..."></textarea>
-          <button onclick="submitReview('${p.id}')">Submit Review</button>
-        </div>
+          <button type="submit">Submit Review</button>
+        </form>
       `;
     }
 
@@ -344,11 +352,11 @@
 
     searchInput.addEventListener('input', async function(e) {
       const q = searchInput.value.trim();
-      // Always trigger autocomplete, even on backspace
       if (!q) {
         removeAutocomplete();
         return;
       }
+      // Fetch autocomplete suggestions
       try {
         const res = await fetch(`${API}/search/autocomplete?q=${encodeURIComponent(q)}`);
         const suggestions = await res.json();
@@ -402,6 +410,8 @@
         autocompleteBox = null;
       }
     }
-  </script>
+</script>
+<!-- Move app.js above inline script to ensure global functions are available for inline event handlers -->
+<script src="app.js"></script>
 </body>
 </html>

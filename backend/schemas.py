@@ -6,6 +6,34 @@ from pydantic import BaseModel, Field
 
 
 # ---------------------------------------------------------------------------
+# User Schemas
+# ---------------------------------------------------------------------------
+
+from typing import Optional
+
+class UserCreate(BaseModel):
+    """Schema for user registration."""
+    email: str = Field(..., min_length=5, max_length=255)
+    first_name: str = Field(..., min_length=1, max_length=100)
+    last_name: str = Field(..., min_length=1, max_length=100)
+    password: str = Field(..., min_length=6, max_length=128)
+    avatar_url: Optional[str] = Field(default=None, max_length=500)
+
+class UserLogin(BaseModel):
+    """Schema for user login."""
+    email: str = Field(..., min_length=5, max_length=255)
+    password: str = Field(..., min_length=6, max_length=128)
+
+class UserResponse(BaseModel):
+    """Schema for user info in API responses."""
+    id: UUID
+    email: str
+    first_name: str
+    last_name: str
+    avatar_url: Optional[str] = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
 # Review Schemas
 # ---------------------------------------------------------------------------
 

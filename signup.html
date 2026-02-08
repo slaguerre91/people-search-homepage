@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sign Up - People Search</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 400px; margin: 60px auto; background: #0f172a; color: #e2e8f0; }
+    h1 { color: #60a5fa; }
+    form { background: #1e293b; padding: 32px 24px; border-radius: 10px; box-shadow: 0 2px 16px #0002; }
+    input { width: 100%; margin-bottom: 14px; padding: 12px; border-radius: 6px; border: none; background: #0f172a; color: #e2e8f0; font-size: 16px; }
+    button { width: 100%; background: #3b82f6; color: white; padding: 12px; border: none; border-radius: 6px; font-size: 16px; cursor: pointer; }
+    button:hover { background: #2563eb; }
+    .back-link { display: block; margin-top: 18px; color: #60a5fa; text-align: center; text-decoration: none; }
+    .back-link:hover { text-decoration: underline; }
+    .error { color: #ef4444; margin-bottom: 10px; }
+    .success { color: #22c55e; margin-bottom: 10px; }
+  </style>
+</head>
+<body>
+  <h1>Sign Up</h1>
+  <form id="signupForm">
+    <input type="email" id="signupEmail" placeholder="Email" required>
+    <input type="text" id="signupFirstName" placeholder="First Name" required>
+    <input type="text" id="signupLastName" placeholder="Last Name" required>
+    <input type="password" id="signupPassword" placeholder="Password" required>
+    <input type="url" id="signupAvatar" placeholder="Avatar URL (optional)">
+    <div id="signupMsg"></div>
+    <button type="submit">Sign Up</button>
+  </form>
+  <a href="index.html" class="back-link">← Back to Home</a>
+  <script>
+    const API = 'http://localhost:8000';
+    document.getElementById('signupForm').onsubmit = async function(e) {
+      e.preventDefault();
+      const email = document.getElementById('signupEmail').value.trim();
+      const first_name = document.getElementById('signupFirstName').value.trim();
+      const last_name = document.getElementById('signupLastName').value.trim();
+      const password = document.getElementById('signupPassword').value;
+      const avatar_url = document.getElementById('signupAvatar').value.trim();
+      const msg = document.getElementById('signupMsg');
+      msg.textContent = '';
+      msg.className = '';
+      try {
+        const payload = { email, first_name, last_name, password };
+        if (avatar_url) payload.avatar_url = avatar_url;
+        const res = await fetch(`${API}/auth/signup`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (res.ok) {
+          msg.textContent = 'Signup successful! You can now sign in.';
+          msg.className = 'success';
+          document.getElementById('signupForm').reset();
+        } else {
+          let errMsg = 'Unknown error';
+          try {
+            const err = await res.json();
+            // FastAPI validation errors
+            if (err.detail && Array.isArray(err.detail)) {
+              // Look for password min_length error
+              const pwErr = err.detail.find(e => e.loc && e.loc.includes('password') && e.msg && e.msg.includes('6 characters'));
+              if (pwErr) {
+                errMsg = 'Password must be at least 6 characters.';
+              } else {
+                errMsg = err.detail.map(e => e.msg).join('; ');
+              }
+            } else {
+              errMsg = err.detail || JSON.stringify(err);
+            }
+          } catch (e) {
+            errMsg = res.statusText || 'Unknown error';
+          }
+          msg.textContent = 'Signup failed: ' + errMsg;
+          msg.className = 'error';
+        }
+      } catch (err) {
+        msg.textContent = 'Signup failed: Network error';
+        msg.className = 'error';
+      }
+    };
+  </script>
+</body>
+</html>
