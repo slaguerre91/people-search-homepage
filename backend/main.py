@@ -165,7 +165,10 @@ async def autocomplete_names(q: str = Query(default="", max_length=100), db: Asy
             "name": p.name,
             "role": p.role,
             "company": p.company,
-            "location": p.location
+            "location": p.location,
+            "avatar_url": p.avatar_url,
+            "is_verified": p.is_verified,
+            "verification_status": p.verification_status,
         } for p in profiles
     ]
 

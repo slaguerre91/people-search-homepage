@@ -63,6 +63,15 @@ function assetUrl(path) {
   return `${API_BASE}${path}`;
 }
 
+function ProfileAvatar({ name, avatarUrl, className = '' }) {
+  const initial = cleanName(name).slice(0, 1).toUpperCase() || '?';
+  return (
+    <span className={`profile-thumb ${className}`.trim()} aria-hidden="true">
+      {avatarUrl ? <img src={assetUrl(avatarUrl)} alt="" /> : initial}
+    </span>
+  );
+}
+
 function reviewSummary(profile) {
   const count = profile?.review_count || 0;
   if (!count || profile.average_rating == null) return 'No reviews yet';
@@ -566,9 +575,12 @@ function SearchView({
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => onProfile(person.id)}
               >
-                <span>
-                  <strong>{cleanName(person.name, person.company)}</strong>
-                  <small>{cleanCompany(person.company, person.name)}</small>
+                <span className="row-main">
+                  <ProfileAvatar name={person.name} avatarUrl={person.avatar_url} className="profile-thumb-sm" />
+                  <span>
+                    <strong>{cleanName(person.name, person.company)}</strong>
+                    <small>{cleanCompany(person.company, person.name)}</small>
+                  </span>
                 </span>
                 {person.location && <small>{person.location}</small>}
               </button>
@@ -659,9 +671,12 @@ function ProfileResult({ profile, onClick }) {
   const name = cleanName(profile.name, company);
   return (
     <button className="profile-row" onClick={onClick}>
-      <span>
-        <strong>{name}</strong>
-        <small>{company} {profile.is_verified ? <span className="verified-inline">Verified</span> : null}</small>
+      <span className="row-main">
+        <ProfileAvatar name={name} avatarUrl={profile.avatar_url} />
+        <span>
+          <strong>{name}</strong>
+          <small>{company} {profile.is_verified ? <span className="verified-inline">Verified</span> : null}</small>
+        </span>
       </span>
       <span className="row-rating">{reviewSummary(profile)}</span>
     </button>
