@@ -57,6 +57,12 @@ function linkedInUrlFromBio(bio) {
   return String(bio || '').match(/https?:\/\/(?:www\.)?linkedin\.com\/in\/[^\s]+/i)?.[0] || '';
 }
 
+function assetUrl(path) {
+  if (!path) return '';
+  if (/^https?:\/\//i.test(path)) return path;
+  return `${API_BASE}${path}`;
+}
+
 function reviewSummary(profile) {
   const count = profile?.review_count || 0;
   if (!count || profile.average_rating == null) return 'No reviews yet';
@@ -86,6 +92,8 @@ function App() {
   const [linkedInResults, setLinkedInResults] = useState([]);
   const [linkedInMeta, setLinkedInMeta] = useState({});
   const [profile, setProfile] = useState(null);
+  const [verificationStatus, setVerificationStatus] = useState(null);
+  const [showVerifyPrompt, setShowVerifyPrompt] = useState(false);
   const [draft, setDraft] = useState(null);
   const [existingMatches, setExistingMatches] = useState([]);
   const [selectedExistingId, setSelectedExistingId] = useState('');
@@ -98,6 +106,39 @@ function App() {
   useEffect(() => {
     if (token) localStorage.setItem('authToken', token);
     else localStorage.removeItem('authToken');
+  }, [token]);
+
+  useEffect(() => {
+    if (!token) {
+      setVerificationStatus(null);
+      setShowVerifyPrompt(false);
+      return;
+    }
+
+    let cancelled = false;
+    async function loadVerificationStatus() {
+      try {
+        const res = await fetch(`${API_BASE}/auth/me/verification`, {
+          headers: authHeaders(),
+        });
+        if (!res.ok) throw new Error('Could not load verification status');
+        const data = await res.json();
+        if (!cancelled) {
+          setVerificationStatus(data);
+          setShowVerifyPrompt(!data.has_verified_profile);
+        }
+      } catch {
+        if (!cancelled) {
+          setVerificationStatus(null);
+          setShowVerifyPrompt(false);
+        }
+      }
+    }
+    loadVerificationStatus();
+
+    return () => {
+      cancelled = true;
+    };
   }, [token]);
 
   useEffect(() => {
@@ -312,9 +353,52 @@ function App() {
     }
   }
 
+  async function submitProfileVerification(profileId, profilePhoto, badgePhoto) {
+    setMessage('');
+    if (!signedIn) {
+      setAuthMode('login');
+      return false;
+    }
+
+    const formData = new FormData();
+    formData.append('profile_photo', profilePhoto);
+    formData.append('badge_photo', badgePhoto);
+
+    const res = await fetch(`${API_BASE}/profiles/${profileId}/verify`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: formData,
+    });
+    if (res.status === 401 || res.status === 403) {
+      setToken('');
+      setMessage('Please log in to verify your profile.');
+      setAuthMode('login');
+      return false;
+    }
+    if (res.status === 409) {
+      const data = await res.json().catch(() => ({}));
+      setMessage(data.detail || 'This account has already verified a leader profile.');
+      return false;
+    }
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setMessage(data.detail || 'Could not verify this profile.');
+      return false;
+    }
+
+    const data = await res.json();
+    setVerificationStatus({ has_verified_profile: true, profile: data.profile });
+    setShowVerifyPrompt(false);
+    setProfile(data.profile);
+    setView('profile');
+    return true;
+  }
+
   function signOut() {
     setToken('');
     setProfile(null);
+    setVerificationStatus(null);
+    setShowVerifyPrompt(false);
     setView('search');
   }
 
@@ -341,6 +425,13 @@ function App() {
             linkedInMeta={linkedInMeta}
             loading={loading}
             message={message}
+            showVerifyPrompt={showVerifyPrompt}
+            verifiedProfile={verificationStatus?.profile}
+            onVerify={() => {
+              setMessage('');
+              setView('verify-profile');
+            }}
+            onDismissVerify={() => setShowVerifyPrompt(false)}
             onSearch={runSearch}
             onManualLinkedIn={() => searchLinkedIn(query)}
             onProfile={openProfile}
@@ -370,6 +461,15 @@ function App() {
             onSubmit={submitLinkedInReview}
             signedIn={signedIn}
             onLogin={() => setAuthMode('login')}
+            message={message}
+          />
+        )}
+
+        {view === 'verify-profile' && (
+          <VerifyProfileView
+            onBack={() => setView('search')}
+            onSearch={searchDatabase}
+            onSubmit={submitProfileVerification}
             message={message}
           />
         )}
@@ -416,6 +516,10 @@ function SearchView({
   linkedInMeta,
   loading,
   message,
+  showVerifyPrompt,
+  verifiedProfile,
+  onVerify,
+  onDismissVerify,
   onSearch,
   onManualLinkedIn,
   onProfile,
@@ -483,6 +587,19 @@ function SearchView({
       {message && <p className="notice">{message}</p>}
       {loading && <p className="notice">Searching...</p>}
 
+      {showVerifyPrompt && !verifiedProfile && (
+        <section className="verify-prompt">
+          <div>
+            <strong>Verify your leader profile</strong>
+            <p>Add your profile photo and submit badge proof so people can recognize the official profile.</p>
+          </div>
+          <div className="verify-prompt-actions">
+            <button className="btn primary" type="button" onClick={onVerify}>Verify Profile</button>
+            <button className="text-btn" type="button" onClick={onDismissVerify}>Later</button>
+          </div>
+        </section>
+      )}
+
       {dbResults.length > 0 && (
         <ResultSection title="Saved Profiles">
           {dbResults.map((person) => (
@@ -544,7 +661,7 @@ function ProfileResult({ profile, onClick }) {
     <button className="profile-row" onClick={onClick}>
       <span>
         <strong>{name}</strong>
-        <small>{company}</small>
+        <small>{company} {profile.is_verified ? <span className="verified-inline">Verified</span> : null}</small>
       </span>
       <span className="row-rating">{reviewSummary(profile)}</span>
     </button>
@@ -562,9 +679,14 @@ function ProfileView({ profile, onBack, onReview, signedIn, onLogin, message }) 
       <button className="back-link" onClick={onBack}>← Back to Search</button>
       <article className="leader-card">
         <div className="cover" />
-        <div className="avatar">{name.slice(0, 1)}</div>
+        <div className="avatar">
+          {profile.avatar_url ? <img src={assetUrl(profile.avatar_url)} alt="" /> : name.slice(0, 1)}
+        </div>
         <div className="leader-info">
-          <h1>{name}</h1>
+          <h1>
+            {name}
+            {profile.is_verified && <span className="verified-badge" title="Verified leader profile">✓</span>}
+          </h1>
           <p>{company}</p>
           <p>{profile.location}</p>
           <div className="rating-line">
@@ -657,6 +779,97 @@ function LinkedInReviewView({
 
       {message && <p className="notice">{message}</p>}
       <ReviewForm signedIn={signedIn} onLogin={onLogin} onSubmit={onSubmit} submitLabel={submitLabel} />
+    </section>
+  );
+}
+
+function VerifyProfileView({ onBack, onSearch, onSubmit, message }) {
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState([]);
+  const [selectedProfile, setSelectedProfile] = useState(null);
+  const [profilePhoto, setProfilePhoto] = useState(null);
+  const [badgePhoto, setBadgePhoto] = useState(null);
+  const [localMessage, setLocalMessage] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  async function search(event) {
+    event.preventDefault();
+    const searchQuery = query.trim();
+    if (!searchQuery) return;
+    setLoading(true);
+    setLocalMessage('');
+    setSelectedProfile(null);
+    try {
+      const people = await onSearch(searchQuery);
+      setResults(people);
+      if (!people.length) setLocalMessage('No saved profiles matched that search.');
+    } catch {
+      setResults([]);
+      setLocalMessage('Could not search saved profiles.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function submit(event) {
+    event.preventDefault();
+    setLocalMessage('');
+    if (!selectedProfile) {
+      setLocalMessage('Choose the profile that belongs to you.');
+      return;
+    }
+    if (!profilePhoto || !badgePhoto) {
+      setLocalMessage('Upload both photos to verify your profile.');
+      return;
+    }
+    const saved = await onSubmit(selectedProfile.id, profilePhoto, badgePhoto);
+    if (!saved) setLocalMessage('');
+  }
+
+  return (
+    <section className="profile-page">
+      <button className="back-link" onClick={onBack}>← Back to Search</button>
+      <article className="verify-card">
+        <h1>Verify Leader Profile</h1>
+        <p className="muted">Find your saved profile, add the photo people should see, and upload a badge photo for later verification review.</p>
+
+        <form className="verify-search" onSubmit={search}>
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search your name or company" />
+          <button className="btn primary" type="submit">{loading ? 'Searching...' : 'Search'}</button>
+        </form>
+
+        {results.length > 0 && (
+          <div className="verify-results">
+            {results.map((person) => (
+              <label className={`choice-row ${selectedProfile?.id === person.id ? 'selected' : ''}`} key={person.id}>
+                <input
+                  type="radio"
+                  name="verify-profile"
+                  checked={selectedProfile?.id === person.id}
+                  onChange={() => setSelectedProfile(person)}
+                />
+                <span>
+                  <strong>{cleanName(person.name, person.company)}</strong>
+                  <small>{cleanCompany(person.company, person.name)} · {person.location}</small>
+                </span>
+              </label>
+            ))}
+          </div>
+        )}
+
+        <form className="verify-upload" onSubmit={submit}>
+          <label>
+            <span>Profile photo</span>
+            <input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => setProfilePhoto(event.target.files?.[0] || null)} />
+          </label>
+          <label>
+            <span>Company badge photo</span>
+            <input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => setBadgePhoto(event.target.files?.[0] || null)} />
+          </label>
+          {(localMessage || message) && <p className="notice inline-notice">{localMessage || message}</p>}
+          <button className="btn primary" type="submit">Verify Profile</button>
+        </form>
+      </article>
     </section>
   );
 }

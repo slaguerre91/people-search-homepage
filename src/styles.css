@@ -243,6 +243,36 @@ button {
   color: var(--muted);
 }
 
+.verified-inline {
+  color: var(--blue);
+  font-weight: 700;
+  margin-left: 8px;
+}
+
+.verify-prompt {
+  width: min(708px, 100%);
+  margin: 32px auto 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.verify-prompt p {
+  color: var(--muted);
+  margin: 4px 0 0;
+}
+
+.verify-prompt-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
 .linkedin-card {
   padding: 16px;
   display: grid;
@@ -318,6 +348,13 @@ button {
   color: var(--blue);
   font-family: Georgia, "Times New Roman", serif;
   font-size: 72px;
+  overflow: hidden;
+}
+
+.avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .leader-info {
@@ -328,6 +365,22 @@ button {
   margin: 0;
   font-size: 22px;
   font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.verified-badge {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--blue);
+  color: #fff;
+  display: inline-grid;
+  place-items: center;
+  font-size: 14px;
+  font-weight: 800;
 }
 
 .leader-info p {
@@ -373,7 +426,8 @@ button {
 .review-form-card,
 .review-list,
 .confirm-card,
-.matches-card {
+.matches-card,
+.verify-card {
   padding: 24px;
   margin-top: 24px;
 }
@@ -393,7 +447,9 @@ button {
 
 .review-form-card select,
 .review-form-card textarea,
-.auth-dialog input {
+.auth-dialog input,
+.verify-search input,
+.verify-upload input[type="file"] {
   width: 100%;
   border: 1px solid #cfcfcf;
   border-radius: 8px;
@@ -451,6 +507,44 @@ button {
 .choice-row small {
   color: var(--muted);
   margin-top: 2px;
+}
+
+.verify-card {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+}
+
+.verify-card h1 {
+  margin: 0 0 8px;
+}
+
+.verify-search {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.verify-results {
+  margin-top: 16px;
+}
+
+.verify-upload {
+  display: grid;
+  gap: 14px;
+  margin-top: 22px;
+}
+
+.verify-upload label span {
+  display: block;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.inline-notice {
+  width: 100%;
+  margin: 0;
 }
 
 .dialog-backdrop {
@@ -527,6 +621,16 @@ button {
   .profile-row {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .verify-prompt,
+  .verify-prompt-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .verify-search {
+    grid-template-columns: 1fr;
   }
 
   .leader-card {

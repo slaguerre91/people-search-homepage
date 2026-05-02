@@ -5,8 +5,9 @@
 from dotenv import load_dotenv
 load_dotenv()
 
-from fastapi import FastAPI, HTTPException, Query, Depends
+from fastapi import FastAPI, HTTPException, Query, Depends, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_, and_, update
 from sqlalchemy.exc import IntegrityError
@@ -14,11 +15,12 @@ from sqlalchemy.orm import selectinload
 from uuid import UUID
 
 from database import get_db, engine, Base
-from models import Profile, Review, User
+from models import Profile, Review, User, LeaderProfileVerification
 from schemas import (
     ProfileCreate, ProfileResponse, ProfileSummary,
     LinkedInReviewCreate, ReviewCreate, ReviewResponse,
-    UserCreate, UserLogin, UserResponse
+    UserCreate, UserLogin, UserResponse,
+    VerificationStatusResponse, ProfileVerificationResponse
 )
 from query_parser import parse_search_query, ParsedQuery
 from linkedin_search import search_linkedin, LinkedInSearchResult
@@ -29,11 +31,17 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi import status
 import os
 import re
+from pathlib import Path
 from datetime import timedelta, datetime
 from typing import Optional
 
 # Initialize FastAPI app immediately after imports
 app = FastAPI(title="People Search API", version="0.4.0")
+
+UPLOAD_ROOT = Path(os.getenv("UPLOAD_ROOT", Path(__file__).resolve().parent / "uploads"))
+PROFILE_VERIFICATION_UPLOAD_ROOT = UPLOAD_ROOT / "profile-verifications"
+PROFILE_VERIFICATION_UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=str(UPLOAD_ROOT)), name="uploads")
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 SECRET_KEY = os.getenv("JWT_SECRET", "dev-secret-key")
@@ -109,6 +117,18 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSessi
 @app.get("/auth/me", response_model=UserResponse)
 async def get_me(current_user: User = Depends(get_current_user)):
     return current_user
+
+
+@app.get("/auth/me/verification", response_model=VerificationStatusResponse)
+async def get_my_verification_status(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Profile).where(Profile.verified_by_user_id == current_user.id)
+    )
+    profile = result.scalars().first()
+    return {"has_verified_profile": profile is not None, "profile": profile}
 
 # All imports at the top
 # ...existing code...
@@ -253,6 +273,92 @@ async def get_profile(
         raise HTTPException(status_code=404, detail="Profile not found")
     
     return profile
+
+
+ALLOWED_VERIFICATION_IMAGE_TYPES = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+}
+MAX_VERIFICATION_IMAGE_BYTES = 5 * 1024 * 1024
+
+
+async def save_verification_image(file: UploadFile, prefix: str, user_id: UUID) -> str:
+    extension = ALLOWED_VERIFICATION_IMAGE_TYPES.get(file.content_type or "")
+    if not extension:
+        raise HTTPException(status_code=400, detail="Images must be JPG, PNG, or WebP")
+
+    contents = await file.read()
+    if not contents:
+        raise HTTPException(status_code=400, detail="Image file cannot be empty")
+    if len(contents) > MAX_VERIFICATION_IMAGE_BYTES:
+        raise HTTPException(status_code=400, detail="Images must be 5MB or smaller")
+
+    filename = f"{prefix}-{user_id}-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}-{os.urandom(4).hex()}{extension}"
+    path = PROFILE_VERIFICATION_UPLOAD_ROOT / filename
+    path.write_bytes(contents)
+    return f"/uploads/profile-verifications/{filename}"
+
+
+@app.post("/profiles/{profile_id}/verify", response_model=ProfileVerificationResponse, status_code=201)
+async def verify_profile(
+    profile_id: UUID,
+    profile_photo: UploadFile = File(...),
+    badge_photo: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Self-verify a leader profile and store badge proof for later review."""
+    result = await db.execute(select(Profile).where(Profile.id == profile_id))
+    profile = result.scalar_one_or_none()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+
+    existing_result = await db.execute(
+        select(Profile).where(
+            Profile.verified_by_user_id == current_user.id,
+            Profile.id != profile_id,
+        )
+    )
+    if existing_result.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="You have already verified a leader profile")
+
+    profile_photo_url = await save_verification_image(profile_photo, "profile", current_user.id)
+    badge_photo_url = await save_verification_image(badge_photo, "badge", current_user.id)
+
+    verification = LeaderProfileVerification(
+        profile_id=profile.id,
+        user_id=current_user.id,
+        profile_photo_url=profile_photo_url,
+        badge_photo_url=badge_photo_url,
+        status="self_verified",
+    )
+    db.add(verification)
+
+    profile.avatar_url = profile_photo_url
+    profile.is_verified = True
+    profile.verification_status = "self_verified"
+    profile.verified_at = datetime.utcnow()
+    profile.verified_by_user_id = current_user.id
+    await db.flush()
+    await db.refresh(verification)
+
+    result = await db.execute(
+        select(Profile)
+        .options(selectinload(Profile.reviews))
+        .where(Profile.id == profile.id)
+    )
+    verified_profile = result.scalar_one()
+
+    return {
+        "id": verification.id,
+        "profile_id": profile.id,
+        "profile_photo_url": profile_photo_url,
+        "badge_photo_url": badge_photo_url,
+        "status": verification.status,
+        "created_at": verification.created_at,
+        "profile": verified_profile,
+    }
 
 
 

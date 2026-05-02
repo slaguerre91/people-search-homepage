@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 from typing import Optional
-from sqlalchemy import String, Integer, ForeignKey, DateTime, UniqueConstraint, text
+from sqlalchemy import String, Integer, ForeignKey, DateTime, UniqueConstraint, Boolean, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -40,12 +40,18 @@ class Profile(Base):
     role: Mapped[str] = mapped_column(String(100), nullable=False)
     location: Mapped[str] = mapped_column(String(100), nullable=False)
     bio: Mapped[str] = mapped_column(String(500), default="")
+    avatar_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    is_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
+    verification_status: Mapped[str] = mapped_column(String(50), nullable=False, default="unverified", server_default=text("'unverified'"))
+    verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    verified_by_user_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     total_review_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
     review_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
 
     # Relationship to reviews
     reviews: Mapped[list["Review"]] = relationship("Review", back_populates="profile", cascade="all, delete-orphan")
+    verifications: Mapped[list["LeaderProfileVerification"]] = relationship("LeaderProfileVerification", back_populates="profile", cascade="all, delete-orphan")
 
     @property
     def average_rating(self) -> Optional[float]:
@@ -73,3 +79,20 @@ class Review(Base):
     # Relationship to profile
     profile: Mapped["Profile"] = relationship("Profile", back_populates="reviews")
     user: Mapped[Optional["User"]] = relationship("User")
+
+
+class LeaderProfileVerification(Base):
+    """Verification submission for a leader profile."""
+    __tablename__ = "leader_profile_verifications"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    profile_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    profile_photo_url: Mapped[str] = mapped_column(String(500), nullable=False)
+    badge_photo_url: Mapped[str] = mapped_column(String(500), nullable=False)
+    status: Mapped[str] = mapped_column(String(50), nullable=False, default="self_verified", server_default=text("'self_verified'"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    profile: Mapped["Profile"] = relationship("Profile", back_populates="verifications")
+    user: Mapped["User"] = relationship("User")
