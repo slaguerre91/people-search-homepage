@@ -39,7 +39,7 @@ class UserResponse(BaseModel):
 
 class ReviewCreate(BaseModel):
     """Schema for creating a review."""
-    author: str = Field(..., min_length=1, max_length=100)
+    author: Optional[str] = Field(default=None, max_length=100)
     rating: int = Field(..., ge=1, le=5)
     comment: str = Field(..., min_length=1, max_length=1000)
 

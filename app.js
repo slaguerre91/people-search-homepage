@@ -1,6 +1,21 @@
 
 // Main search, profile, review, and autocomplete logic (no auth)
-const API = 'http://localhost:8000';
+const API_BASE = window.API || 'http://localhost:8000';
+
+function updateAuthControls() {
+  const signedIn = Boolean(localStorage.getItem('authToken'));
+  document.getElementById('signupLink')?.classList.toggle('hidden', signedIn);
+  document.getElementById('signinLink')?.classList.toggle('hidden', signedIn);
+  document.getElementById('signoutBtn')?.classList.toggle('hidden', !signedIn);
+}
+
+function signOut() {
+  localStorage.removeItem('authToken');
+  updateAuthControls();
+  showSearch();
+}
+window.signOut = signOut;
+updateAuthControls();
 
 // Main unified search
 async function doSearch() {
@@ -62,7 +77,7 @@ async function searchDatabase(q) {
   const resultsEl = document.getElementById('dbResults');
   const countEl = document.getElementById('dbCount');
   try {
-    const res = await fetch(`${API}/search?q=${encodeURIComponent(q)}`);
+    const res = await fetch(`${API_BASE}/search?q=${encodeURIComponent(q)}`);
     const people = await res.json();
     section.classList.remove('hidden');
     countEl.textContent = people.length;
@@ -110,7 +125,7 @@ async function searchLinkedIn(q) {
   const resultsEl = document.getElementById('linkedinResults');
   const countEl = document.getElementById('linkedinCount');
   try {
-    const res = await fetch(`${API}/search/linkedin?q=${encodeURIComponent(q)}`);
+    const res = await fetch(`${API_BASE}/search/linkedin?q=${encodeURIComponent(q)}`);
     if (!res.ok) throw new Error('Search failed');
     const data = await res.json();
     countEl.textContent = data.profiles.length;
@@ -172,7 +187,7 @@ function renderLinkedInResults(profiles, parsedName, parsedCompany) {
 
 // View Profile
 async function viewProfile(id) {
-  const res = await fetch(`${API}/profiles/${id}`);
+  const res = await fetch(`${API_BASE}/profiles/${id}`);
   if (!res.ok) { alert('Profile not found'); return; }
   const profile = await res.json();
   renderProfile(profile);
@@ -202,7 +217,6 @@ function renderProfile(p) {
     ${reviews}
     <form class="review-form" id="reviewForm" onsubmit="event.preventDefault(); submitReview('${p.id}');">
       <h4>Add a Review</h4>
-      <input id="reviewAuthor" placeholder="Your name">
       <select id="reviewRating" style="padding:10px; background:#0f172a; color:#e2e8f0; border:none; border-radius:6px;">
         <option value="5">⭐⭐⭐⭐⭐ (5)</option>
         <option value="4">⭐⭐⭐⭐ (4)</option>
@@ -218,22 +232,24 @@ function renderProfile(p) {
 
 // Submit Review
 async function submitReview(profileId) {
-  const author = document.getElementById('reviewAuthor').value.trim();
   const rating = parseInt(document.getElementById('reviewRating').value);
   const comment = document.getElementById('reviewComment').value.trim();
-  if (!author || !comment) { alert('Please fill in all fields'); return; }
+  if (!comment) { alert('Please write a review'); return; }
   const token = localStorage.getItem('authToken');
   const headers = { 'Content-Type': 'application/json' };
   if (token) headers['Authorization'] = 'Bearer ' + token;
-  const res = await fetch(`${API}/profiles/${profileId}/reviews`, {
+  const res = await fetch(`${API_BASE}/profiles/${profileId}/reviews`, {
     method: 'POST',
     headers,
-    body: JSON.stringify({ author, rating, comment })
+    body: JSON.stringify({ rating, comment })
   });
   if (res.ok) {
     viewProfile(profileId);
   } else if (res.status === 401) {
     alert('You must be signed in to submit a review.');
+    updateAuthControls();
+  } else if (res.status === 409) {
+    alert('You have already reviewed this profile.');
   } else {
     alert('Failed to submit review');
   }
@@ -258,7 +274,7 @@ searchInput.addEventListener('input', async function(e) {
   }
   // Fetch autocomplete suggestions
   try {
-    const res = await fetch(`${API}/search/autocomplete?q=${encodeURIComponent(q)}`);
+    const res = await fetch(`${API_BASE}/search/autocomplete?q=${encodeURIComponent(q)}`);
     const suggestions = await res.json();
     autocompleteResults = suggestions;
     showAutocomplete(suggestions);

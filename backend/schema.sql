@@ -5,6 +5,18 @@
 -- Drop tables if they exist (for clean rebuild)
 DROP TABLE IF EXISTS reviews CASCADE;
 DROP TABLE IF EXISTS profiles CASCADE;
+DROP TABLE IF EXISTS users CASCADE;
+
+-- Users table
+CREATE TABLE users (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    email VARCHAR(255) NOT NULL UNIQUE,
+    first_name VARCHAR(100) NOT NULL,
+    last_name VARCHAR(100) NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    avatar_url VARCHAR(500),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
 
 -- Profiles table
 CREATE TABLE profiles (
@@ -23,13 +35,16 @@ CREATE TABLE profiles (
 CREATE TABLE reviews (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     profile_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES users(id) ON DELETE SET NULL,
     author VARCHAR(100) NOT NULL,
     rating INTEGER NOT NULL CHECK (rating >= 1 AND rating <= 5),
     comment VARCHAR(1000) NOT NULL,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    CONSTRAINT uq_reviews_profile_user UNIQUE (profile_id, user_id)
 );
 
 -- Indexes for common queries
+CREATE INDEX ix_users_email ON users(email);
 CREATE INDEX idx_profiles_name ON profiles USING gin(to_tsvector('english', name));
 CREATE INDEX idx_profiles_company ON profiles USING gin(to_tsvector('english', company));
 CREATE INDEX idx_profiles_role ON profiles USING gin(to_tsvector('english', role));

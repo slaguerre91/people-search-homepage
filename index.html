@@ -59,14 +59,21 @@
     
     /* Parsed info */
     .parsed-info { font-size: 12px; color: #64748b; margin-bottom: 12px; padding: 8px 12px; background: #1e293b; border-radius: 6px; display: flex; align-items: center; gap: 8px; }
+    .auth-actions { display: flex; align-items: center; gap: 8px; }
+    .auth-link, .auth-button { background:#334155; color:#e2e8f0; padding:10px 18px; border:none; border-radius:6px; font-size:15px; cursor:pointer; text-decoration:none; display:inline-block; }
+    .auth-link:hover, .auth-button:hover { background:#475569; }
+    .auth-actions .hidden { display: none; }
   </style>
 </head>
 <body>
 
   <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:24px;">
     <h1>🔍 People Search</h1>
-    <a href="signup.html" style="background:#334155; color:#e2e8f0; padding:10px 18px; border:none; border-radius:6px; font-size:15px; cursor:pointer; text-decoration:none; display:inline-block;">Sign Up</a>
-    <a href="login.html" style="background:#334155; color:#e2e8f0; padding:10px 18px; border:none; border-radius:6px; font-size:15px; cursor:pointer; text-decoration:none; display:inline-block; margin-left:8px;">Sign In</a>
+    <div class="auth-actions">
+      <a id="signupLink" href="signup.html" class="auth-link">Sign Up</a>
+      <a id="signinLink" href="login.html" class="auth-link">Sign In</a>
+      <button id="signoutBtn" class="auth-button hidden" type="button" onclick="signOut()">Sign Out</button>
+    </div>
   </div>
 
   <!-- Auth Page (hidden by default) -->
@@ -323,18 +330,24 @@
 
     // Submit Review
     async function submitReview(profileId) {
-      const author = document.getElementById('reviewAuthor').value.trim();
       const rating = parseInt(document.getElementById('reviewRating').value);
       const comment = document.getElementById('reviewComment').value.trim();
-      if (!author || !comment) { alert('Please fill in all fields'); return; }
+      if (!comment) { alert('Please write a review'); return; }
 
+      const token = localStorage.getItem('authToken');
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = 'Bearer ' + token;
       const res = await fetch(`${API}/profiles/${profileId}/reviews`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ author, rating, comment })
+        headers,
+        body: JSON.stringify({ rating, comment })
       });
       if (res.ok) {
         viewProfile(profileId);
+      } else if (res.status === 401) {
+        alert('You must be signed in to submit a review.');
+      } else if (res.status === 409) {
+        alert('You have already reviewed this profile.');
       } else {
         alert('Failed to submit review');
       }

@@ -9,6 +9,7 @@ from fastapi import FastAPI, HTTPException, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_, and_, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 from uuid import UUID
 
@@ -269,9 +270,20 @@ async def add_review(
     profile = result.scalar_one_or_none()
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
+
+    existing_review_result = await db.execute(
+        select(Review.id).where(
+            Review.profile_id == profile_id,
+            Review.user_id == current_user.id,
+        )
+    )
+    if existing_review_result.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="You have already reviewed this profile")
+
     # Use current user's name as author
     review = Review(
         profile_id=profile_id,
+        user_id=current_user.id,
         author=f"{current_user.first_name} {current_user.last_name}",
         rating=data.rating,
         comment=data.comment
@@ -285,7 +297,10 @@ async def add_review(
             review_count=Profile.review_count + 1,
         )
     )
-    await db.flush()
+    try:
+        await db.flush()
+    except IntegrityError:
+        raise HTTPException(status_code=409, detail="You have already reviewed this profile")
     await db.refresh(review)
     return review
 
