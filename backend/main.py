@@ -8,7 +8,7 @@ load_dotenv()
 from fastapi import FastAPI, HTTPException, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, or_, and_
+from sqlalchemy import select, or_, and_, update
 from sqlalchemy.orm import selectinload
 from uuid import UUID
 
@@ -28,6 +28,7 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi import status
 import os
 from datetime import timedelta, datetime
+from typing import Optional
 
 # Initialize FastAPI app immediately after imports
 app = FastAPI(title="People Search API", version="0.4.0")
@@ -41,7 +42,7 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 # ----------------------
 # JWT Auth Helpers
 # ----------------------
-def create_access_token(data: dict, expires_delta: timedelta | None = None):
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode = data.copy()
     expire = datetime.utcnow() + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
     to_encode.update({"exp": expire})
@@ -276,6 +277,14 @@ async def add_review(
         comment=data.comment
     )
     db.add(review)
+    await db.execute(
+        update(Profile)
+        .where(Profile.id == profile_id)
+        .values(
+            total_review_score=Profile.total_review_score + data.rating,
+            review_count=Profile.review_count + 1,
+        )
+    )
     await db.flush()
     await db.refresh(review)
     return review
@@ -300,4 +309,3 @@ async def linkedin_search(
 async def health_check():
     """Health check endpoint."""
     return {"status": "ok"}
-

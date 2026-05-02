@@ -48,6 +48,15 @@ async function doSearch() {
 }
 
 // Database search
+function formatReviewSummary(profile) {
+  const count = profile.review_count || 0;
+  if (!count || profile.average_rating === null || profile.average_rating === undefined) {
+    return 'No reviews yet';
+  }
+  const label = count === 1 ? 'review' : 'reviews';
+  return `⭐ ${Number(profile.average_rating).toFixed(1)} (${count} ${label})`;
+}
+
 async function searchDatabase(q) {
   const section = document.getElementById('dbSection');
   const resultsEl = document.getElementById('dbResults');
@@ -71,6 +80,7 @@ async function searchDatabase(q) {
         <h3>${p.name}</h3>
         <p><strong>${p.company}</strong> • ${p.role}</p>
         <p style="font-size:12px; color:#64748b;">${p.location}</p>
+        <p style="font-size:12px; color:#fbbf24; margin-top:6px;">${formatReviewSummary(p)}</p>
       </div>
     `).join('');
     return true;
@@ -172,6 +182,7 @@ async function viewProfile(id) {
 window.viewProfile = viewProfile;
 
 function renderProfile(p) {
+  const reviewSummary = formatReviewSummary(p);
   const reviews = p.reviews.length 
     ? p.reviews.map(r => `
         <div class="review">
@@ -184,6 +195,7 @@ function renderProfile(p) {
     <h2>${p.name}</h2>
     <p style="font-size:18px; color:#60a5fa;">${p.company}</p>
     <p><strong>${p.role}</strong> • ${p.location}</p>
+    <p style="color:#fbbf24;">${reviewSummary}</p>
     <p>${p.bio || 'No bio provided.'}</p>
     <hr style="border-color:#334155; margin:16px 0;">
     <h3>Reviews</h3>

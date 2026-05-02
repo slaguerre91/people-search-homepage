@@ -75,6 +75,8 @@ class ProfileSummary(BaseModel):
     company: str
     role: str
     location: str
+    review_count: int
+    average_rating: Optional[float] = None
 
     model_config = {"from_attributes": True}
 
@@ -87,6 +89,9 @@ class ProfileResponse(BaseModel):
     role: str
     location: str
     bio: str
+    total_review_score: int
+    review_count: int
+    average_rating: Optional[float] = None
     created_at: datetime
     reviews: list[ReviewResponse] = []
 

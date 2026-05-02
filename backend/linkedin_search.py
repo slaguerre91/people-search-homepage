@@ -3,6 +3,7 @@
 import os
 import re
 import json
+from typing import Optional
 from ddgs import DDGS
 from pydantic import BaseModel
 from query_parser import parse_search_query, ParsedQuery
@@ -20,10 +21,10 @@ except ImportError:
 class LinkedInProfile(BaseModel):
     """Parsed LinkedIn profile from search results."""
     name: str
-    title: str | None = None
-    location: str | None = None
+    title: Optional[str] = None
+    location: Optional[str] = None
     url: str
-    snippet: str | None = None
+    snippet: Optional[str] = None
     match_score: int = 0  # 0-100, higher = better match
 
 
@@ -31,11 +32,11 @@ class LinkedInSearchResult(BaseModel):
     """Response from LinkedIn search."""
     profiles: list[LinkedInProfile]
     query: str
-    parsed_name: str | None = None
-    parsed_company: str | None = None
+    parsed_name: Optional[str] = None
+    parsed_company: Optional[str] = None
 
 
-def parse_linkedin_result(result: dict) -> LinkedInProfile | None:
+def parse_linkedin_result(result: dict) -> Optional[LinkedInProfile]:
     """Parse a DuckDuckGo search result into a LinkedIn profile."""
     url = result.get('href', '')
     title = result.get('title', '')
@@ -89,8 +90,8 @@ def parse_linkedin_result(result: dict) -> LinkedInProfile | None:
 
 async def rank_profiles_with_gpt(
     profiles: list[LinkedInProfile], 
-    target_name: str | None, 
-    target_company: str | None
+    target_name: Optional[str], 
+    target_company: Optional[str]
 ) -> list[LinkedInProfile]:
     """Use ChatGPT to score and rank profiles based on how well they match the search."""
     if not _openai_client or not profiles:
@@ -178,8 +179,8 @@ Return ONLY a JSON array of scores in order, like: [85, 60, 40, ...]"""
 
 def basic_rank_profiles(
     profiles: list[LinkedInProfile], 
-    target_name: str | None, 
-    target_company: str | None
+    target_name: Optional[str], 
+    target_company: Optional[str]
 ) -> list[LinkedInProfile]:
     """Simple keyword-based ranking as fallback."""
     for p in profiles:
@@ -202,7 +203,7 @@ def basic_rank_profiles(
     return profiles
 
 
-def extract_profile_from_url(url: str) -> LinkedInProfile | None:
+def extract_profile_from_url(url: str) -> Optional[LinkedInProfile]:
     """Extract profile info from a direct LinkedIn URL."""
     if 'linkedin.com/in/' not in url:
         return None

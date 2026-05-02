@@ -14,6 +14,8 @@ CREATE TABLE profiles (
     role VARCHAR(100) NOT NULL,
     location VARCHAR(100) NOT NULL,
     bio VARCHAR(500) DEFAULT '',
+    total_review_score INTEGER NOT NULL DEFAULT 0,
+    review_count INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -110,4 +112,3 @@ INSERT INTO profiles (name, company, role, location, bio) VALUES
     ('Michael Brown', 'Zoom', 'Video Engineer', 'San Jose, CA', 'Real-time video.'),
     ('Emily Wilson', 'Pinterest', 'ML Scientist', 'San Francisco, CA', 'Visual search.'),
     ('Emily Chen', 'Twitter', 'Backend Engineer', 'San Francisco, CA', 'Timeline systems.');
-

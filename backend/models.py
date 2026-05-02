@@ -1,8 +1,11 @@
 """SQLAlchemy ORM models."""
 
+from __future__ import annotations
+
 import uuid
 from datetime import datetime
-from sqlalchemy import String, Integer, Text, ForeignKey, DateTime, LargeBinary
+from typing import Optional
+from sqlalchemy import String, Integer, ForeignKey, DateTime, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -18,7 +21,7 @@ class User(Base):
     first_name: Mapped[str] = mapped_column(String(100), nullable=False)
     last_name: Mapped[str] = mapped_column(String(100), nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
-    avatar_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    avatar_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
 
     # Relationship to reviews (optional, for future use)
@@ -37,10 +40,19 @@ class Profile(Base):
     role: Mapped[str] = mapped_column(String(100), nullable=False)
     location: Mapped[str] = mapped_column(String(100), nullable=False)
     bio: Mapped[str] = mapped_column(String(500), default="")
+    total_review_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    review_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
 
     # Relationship to reviews
     reviews: Mapped[list["Review"]] = relationship("Review", back_populates="profile", cascade="all, delete-orphan")
+
+    @property
+    def average_rating(self) -> Optional[float]:
+        """Average review rating, or None when no reviews exist."""
+        if self.review_count == 0:
+            return None
+        return round(self.total_review_score / self.review_count, 2)
 
 
 class Review(Base):
