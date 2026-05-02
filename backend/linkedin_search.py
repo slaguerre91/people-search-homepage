@@ -21,6 +21,7 @@ except ImportError:
 class LinkedInProfile(BaseModel):
     """Parsed LinkedIn profile from search results."""
     name: str
+    company: Optional[str] = None
     title: Optional[str] = None
     location: Optional[str] = None
     url: str
@@ -80,6 +81,7 @@ def parse_linkedin_result(result: dict) -> Optional[LinkedInProfile]:
     
     return LinkedInProfile(
         name=name,
+        company=None,
         title=job_title,
         location=location,
         url=url,
@@ -177,6 +179,113 @@ Return ONLY a JSON array of scores in order, like: [85, 60, 40, ...]"""
     return profiles
 
 
+def _extract_json_array(content: str):
+    """Extract a JSON array from a model response."""
+    if "```" in content:
+        content = content.split("```")[1]
+        if content.startswith("json"):
+            content = content[4:]
+
+    start = content.find("[")
+    end = content.rfind("]") + 1
+    if start >= 0 and end > start:
+        content = content[start:end]
+
+    return json.loads(content)
+
+
+def _clean_metadata_value(value: Optional[str], max_length: int = 100) -> Optional[str]:
+    """Keep only compact single-field metadata."""
+    if not value:
+        return None
+    value = re.sub(r"\s*\|\s*LinkedIn.*$", "", str(value), flags=re.IGNORECASE)
+    value = re.sub(r"\s*\.\.\..*$", "", value)
+    value = re.sub(r"\s+", " ", value).strip(" -,\t\n\r")
+    if not value:
+        return None
+    return value[:max_length]
+
+
+async def clean_profiles_with_gpt(
+    profiles: list[LinkedInProfile],
+    query: str,
+    target_name: Optional[str],
+    target_company: Optional[str],
+) -> list[LinkedInProfile]:
+    """Use ChatGPT to produce conservative user-facing metadata."""
+    if not _openai_client or not profiles:
+        return profiles
+
+    results_text = "\n".join([
+        "\n".join([
+            f"{i}.",
+            f"URL: {p.url}",
+            f"Search title: {p.name}{' - ' + p.title if p.title else ''}",
+            f"Search snippet: {p.snippet or ''}",
+            f"Parsed location: {p.location or ''}",
+        ])
+        for i, p in enumerate(profiles[:10])
+    ])
+
+    prompt = f"""Clean LinkedIn search results for display in a review app.
+
+User search: {query}
+Parsed target name: {target_name or ""}
+Parsed target company: {target_company or ""}
+
+Raw results:
+{results_text}
+
+Return ONLY a JSON array with one object per result, in the same order:
+[
+  {{"name": "...", "company": "...", "location": "..."}}
+]
+
+Rules:
+- Be conservative. Only include values directly supported by the result title, URL slug, or snippet.
+- The name must be one person's name. Never include company prefixes, lists of people, or text after "...".
+- The company must be one organization. Prefer the user's searched company when the result appears to match it.
+- The location must be a location only, or null.
+- If a snippet appears to mention multiple people, ignore the snippet for name/company.
+- Use null for uncertain fields. Do not invent work history, education, role, or biography."""
+
+    try:
+        response = await _openai_client.chat.completions.create(
+            model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+            messages=[
+                {"role": "system", "content": "You clean noisy search results into conservative JSON metadata."},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0,
+            max_tokens=900,
+        )
+        content = response.choices[0].message.content.strip()
+        cleaned_results = _extract_json_array(content)
+
+        for i, cleaned in enumerate(cleaned_results):
+            if i >= len(profiles) or not isinstance(cleaned, dict):
+                continue
+            name = _clean_metadata_value(cleaned.get("name"))
+            company = _clean_metadata_value(cleaned.get("company"))
+            location = _clean_metadata_value(cleaned.get("location"), max_length=100)
+
+            if name:
+                profiles[i].name = name
+            if company:
+                profiles[i].company = company
+            elif target_company:
+                profiles[i].company = target_company
+            if location:
+                profiles[i].location = location
+
+            profiles[i].snippet = None
+            profiles[i].title = None
+    except Exception as e:
+        print(f"GPT metadata cleanup failed: {e}")
+
+    return profiles
+
+
 def basic_rank_profiles(
     profiles: list[LinkedInProfile], 
     target_name: Optional[str], 
@@ -226,6 +335,7 @@ def extract_profile_from_url(url: str) -> Optional[LinkedInProfile]:
     
     return LinkedInProfile(
         name=name,
+        company=None,
         title=None,
         location=None,
         url=url if url.startswith('http') else f'https://www.linkedin.com/in/{slug}',
@@ -322,6 +432,8 @@ async def search_linkedin(query: str, max_results: int = 10) -> LinkedInSearchRe
             profiles = await rank_profiles_with_gpt(profiles, target_name, target_company)
         else:
             profiles = basic_rank_profiles(profiles, target_name, target_company)
+
+    profiles = await clean_profiles_with_gpt(profiles, query, target_name, target_company)
     
     return LinkedInSearchResult(
         profiles=profiles[:max_results],

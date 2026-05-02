@@ -137,6 +137,46 @@
   <script>
     const API = 'http://localhost:8000';
 
+    function cleanLinkedInText(value) {
+      return String(value || '')
+        .replace(/\s*\|\s*LinkedIn.*$/i, '')
+        .replace(/\s+LinkedIn\s*$/i, '')
+        .replace(/\s*\.\.\..*$/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    }
+
+    function cleanCompany(company, name = '') {
+      let value = cleanLinkedInText(company);
+      if (name && value.toLowerCase().includes(name.toLowerCase())) {
+        value = value.slice(0, value.toLowerCase().indexOf(name.toLowerCase())).trim();
+      }
+      if (value.includes(' - ')) value = value.split(' - ')[0].trim();
+      return value || 'Unknown';
+    }
+
+    function cleanLinkedInName(name, company = '') {
+      let value = cleanLinkedInText(name);
+      if (value.includes(' - ')) value = value.split(' - ')[0].trim();
+      if (company && value.toLowerCase().startsWith(company.toLowerCase())) {
+        value = value.slice(company.length).trim();
+      }
+      return value || 'LinkedIn Member';
+    }
+
+    function cleanRole(role, name = '') {
+      let value = cleanLinkedInText(role);
+      if (value.includes(' - ')) {
+        const [beforeDash, afterDash] = value.split(' - ', 2);
+        const looksLikeRole = /\b(chief|officer|director|manager|engineer|lead|head|president|founder|staff|policy|people|operations)\b/i.test(afterDash);
+        if (!name || beforeDash.toLowerCase().includes(name.toLowerCase()) || looksLikeRole) value = afterDash.trim();
+      }
+      if (name && value.toLowerCase().startsWith(name.toLowerCase())) {
+        value = value.slice(name.length).replace(/^[-,\s]+/, '').trim();
+      }
+      return value || 'LinkedIn Member';
+    }
+
     // Main unified search
     async function doSearch() {
       const q = document.getElementById('searchInput').value.trim();
@@ -186,13 +226,17 @@
           `;
           return false;
         }
-        resultsEl.innerHTML = people.map(p => `
-          <div class="card" onclick="viewProfile('${p.id}')">
-            <h3>${p.name}</h3>
-            <p><strong>${p.company}</strong> • ${p.role}</p>
-            <p style="font-size:12px; color:#64748b;">${p.location}</p>
-          </div>
-        `).join('');
+        resultsEl.innerHTML = people.map(p => {
+          const company = cleanCompany(p.company, p.name);
+          const displayName = cleanLinkedInName(p.name, company);
+          return `
+            <div class="card" onclick="viewProfile('${p.id}')">
+              <h3>${displayName}</h3>
+              <p><strong>${company}</strong> • ${cleanRole(p.role, displayName)}</p>
+              <p style="font-size:12px; color:#64748b;">${p.location}</p>
+            </div>
+          `;
+        }).join('');
         return true;
       } catch (err) {
         section.classList.remove('hidden');
@@ -274,10 +318,8 @@
         
         return `
           <div class="linkedin-card">
-            <h3><a href="${p.url}" target="_blank">${p.name}</a>${scoreBadge}</h3>
-            <p>${p.title || 'LinkedIn Member'}</p>
-            ${p.location ? `<p style="font-size:12px;">${p.location}</p>` : ''}
-            ${p.snippet ? `<p style="font-size:12px; color:#64748b; margin-top:8px;">${p.snippet}</p>` : ''}
+            <h3><a href="${p.url}" target="_blank">${cleanLinkedInName(p.name, parsedCompany || '')}</a>${scoreBadge}</h3>
+            <p>${parsedCompany || cleanCompany('', p.name)}</p>
           </div>
         `;
       }).join('');
@@ -296,6 +338,48 @@
     }
 
     function renderProfile(p) {
+      const cleanLinkedInText = (value) => String(value || '')
+        .replace(/\s*\|\s*LinkedIn.*$/i, '')
+        .replace(/\s+LinkedIn\s*$/i, '')
+        .replace(/\s*\.\.\..*$/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+      const cleanCompany = (company, name = '') => {
+        let value = cleanLinkedInText(company);
+        if (name && value.toLowerCase().includes(name.toLowerCase())) {
+          value = value.slice(0, value.toLowerCase().indexOf(name.toLowerCase())).trim();
+        }
+        if (value.includes(' - ')) value = value.split(' - ')[0].trim();
+        return value || 'Unknown';
+      };
+      const cleanRole = (role, name = '') => {
+        let value = cleanLinkedInText(role);
+        if (value.includes(' - ')) {
+          const [beforeDash, afterDash] = value.split(' - ', 2);
+          const looksLikeRole = /\b(chief|officer|director|manager|engineer|lead|head|president|founder|staff|policy|people|operations)\b/i.test(afterDash);
+          if (!name || beforeDash.toLowerCase().includes(name.toLowerCase()) || looksLikeRole) value = afterDash.trim();
+        }
+        if (name && value.toLowerCase().startsWith(name.toLowerCase())) {
+          value = value.slice(name.length).replace(/^[-,\s]+/, '').trim();
+        }
+        return value || 'LinkedIn Member';
+      };
+      const cleanLinkedInName = (name, company = '') => {
+        let value = cleanLinkedInText(name);
+        if (value.includes(' - ')) value = value.split(' - ')[0].trim();
+        if (company && value.toLowerCase().startsWith(company.toLowerCase())) {
+          value = value.slice(company.length).trim();
+        }
+        return value || 'LinkedIn Member';
+      };
+      const formatProfileBio = (bio) => {
+        if (!bio) return 'No bio provided.';
+        const linkedinMatch = bio.match(/https?:\/\/(?:www\.)?linkedin\.com\/in\/[^\s]+/i);
+        if (linkedinMatch) {
+          return `<a href="${linkedinMatch[0]}" target="_blank" style="color:#60a5fa;">LinkedIn profile</a>`;
+        }
+        return bio;
+      };
       const reviews = p.reviews.length 
         ? p.reviews.map(r => `
             <div class="review">
@@ -306,10 +390,10 @@
         : '<p>No reviews yet.</p>';
 
       document.getElementById('profileContent').innerHTML = `
-        <h2>${p.name}</h2>
-        <p style="font-size:18px; color:#60a5fa;">${p.company}</p>
-        <p><strong>${p.role}</strong> • ${p.location}</p>
-        <p>${p.bio || 'No bio provided.'}</p>
+        <h2>${cleanLinkedInName(p.name, cleanCompany(p.company, p.name))}</h2>
+        <p style="font-size:18px; color:#60a5fa;">${cleanCompany(p.company, p.name)}</p>
+        <p>${p.location}</p>
+        <p>${formatProfileBio(p.bio)}</p>
         <hr style="border-color:#334155; margin:16px 0;">
         <h3>Reviews</h3>
         ${reviews}

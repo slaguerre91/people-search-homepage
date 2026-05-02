@@ -68,6 +68,13 @@ class ProfileCreate(BaseModel):
     bio: str = Field(default="", max_length=500)
 
 
+class LinkedInReviewCreate(BaseModel):
+    """Schema for creating a saved profile and review from LinkedIn search."""
+    profile: ProfileCreate
+    review: ReviewCreate
+    existing_profile_id: Optional[UUID] = None
+
+
 class ProfileSummary(BaseModel):
     """Lightweight profile for search results."""
     id: UUID

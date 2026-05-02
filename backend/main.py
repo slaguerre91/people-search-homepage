@@ -17,7 +17,7 @@ from database import get_db, engine, Base
 from models import Profile, Review, User
 from schemas import (
     ProfileCreate, ProfileResponse, ProfileSummary,
-    ReviewCreate, ReviewResponse,
+    LinkedInReviewCreate, ReviewCreate, ReviewResponse,
     UserCreate, UserLogin, UserResponse
 )
 from query_parser import parse_search_query, ParsedQuery
@@ -28,6 +28,7 @@ from passlib.context import CryptContext
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi import status
 import os
+import re
 from datetime import timedelta, datetime
 from typing import Optional
 
@@ -303,6 +304,99 @@ async def add_review(
         raise HTTPException(status_code=409, detail="You have already reviewed this profile")
     await db.refresh(review)
     return review
+
+
+def clean_linkedin_text(value: str) -> str:
+    """Remove search-result decoration from LinkedIn-derived fields."""
+    value = re.sub(r"\s*\|\s*LinkedIn.*$", "", value or "", flags=re.IGNORECASE)
+    value = re.sub(r"\s+LinkedIn\s*$", "", value, flags=re.IGNORECASE)
+    value = re.sub(r"\s*\.\.\..*$", "", value)
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def clean_linkedin_company(company: str, name: str) -> str:
+    value = clean_linkedin_text(company)
+    if name and name.lower() in value.lower():
+        value = value[:value.lower().index(name.lower())].strip()
+    if " - " in value:
+        value = value.split(" - ", 1)[0].strip()
+    return value or "Unknown"
+
+
+def clean_linkedin_role(role: str, name: str) -> str:
+    value = clean_linkedin_text(role)
+    if " - " in value:
+        before_dash, after_dash = value.split(" - ", 1)
+        if not name or name.lower() in before_dash.lower():
+            value = after_dash.strip()
+    if name and value.lower().startswith(name.lower()):
+        value = re.sub(r"^[-,\s]+", "", value[len(name):]).strip()
+    return value or "LinkedIn Member"
+
+
+@app.post("/linkedin/reviews", response_model=ProfileResponse, status_code=201)
+async def create_linkedin_profile_review(
+    data: LinkedInReviewCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Create a profile from LinkedIn result data, or use a profile the user chose."""
+    profile_data = data.profile
+    cleaned_profile_data = profile_data.model_copy(
+        update={
+            "company": clean_linkedin_company(profile_data.company, profile_data.name)[:100],
+            "role": clean_linkedin_role(profile_data.role, profile_data.name)[:100],
+        }
+    )
+
+    if data.existing_profile_id:
+        result = await db.execute(
+            select(Profile).where(Profile.id == data.existing_profile_id)
+        )
+        profile = result.scalar_one_or_none()
+        if not profile:
+            raise HTTPException(status_code=404, detail="Profile not found")
+    else:
+        profile = Profile(**cleaned_profile_data.model_dump())
+        db.add(profile)
+        await db.flush()
+
+    existing_review_result = await db.execute(
+        select(Review.id).where(
+            Review.profile_id == profile.id,
+            Review.user_id == current_user.id,
+        )
+    )
+    if existing_review_result.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="You have already reviewed this profile")
+
+    review = Review(
+        profile_id=profile.id,
+        user_id=current_user.id,
+        author=f"{current_user.first_name} {current_user.last_name}",
+        rating=data.review.rating,
+        comment=data.review.comment,
+    )
+    db.add(review)
+    await db.execute(
+        update(Profile)
+        .where(Profile.id == profile.id)
+        .values(
+            total_review_score=Profile.total_review_score + data.review.rating,
+            review_count=Profile.review_count + 1,
+        )
+    )
+    try:
+        await db.flush()
+    except IntegrityError:
+        raise HTTPException(status_code=409, detail="You have already reviewed this profile")
+
+    result = await db.execute(
+        select(Profile)
+        .options(selectinload(Profile.reviews))
+        .where(Profile.id == profile.id)
+    )
+    return result.scalar_one()
 
 
 @app.get("/search/linkedin", response_model=LinkedInSearchResult)
