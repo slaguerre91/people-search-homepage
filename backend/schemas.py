@@ -66,6 +66,7 @@ class ProfileCreate(BaseModel):
     role: str = Field(..., min_length=1, max_length=100)
     location: str = Field(..., min_length=1, max_length=100)
     bio: str = Field(default="", max_length=500)
+    linkedin_url: Optional[str] = Field(default=None, max_length=500)
 
 
 class LinkedInReviewCreate(BaseModel):
@@ -85,6 +86,7 @@ class ProfileSummary(BaseModel):
     review_count: int
     average_rating: Optional[float] = None
     avatar_url: Optional[str] = None
+    linkedin_url: Optional[str] = None
     is_verified: bool = False
     verification_status: str = "unverified"
 
@@ -100,6 +102,7 @@ class ProfileResponse(BaseModel):
     location: str
     bio: str
     avatar_url: Optional[str] = None
+    linkedin_url: Optional[str] = None
     is_verified: bool = False
     verification_status: str = "unverified"
     verified_at: Optional[datetime] = None

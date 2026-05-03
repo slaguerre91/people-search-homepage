@@ -26,6 +26,7 @@ CREATE TABLE profiles (
     role VARCHAR(100) NOT NULL,
     location VARCHAR(100) NOT NULL,
     bio VARCHAR(500) DEFAULT '',
+    linkedin_url VARCHAR(500),
     total_review_score INTEGER NOT NULL DEFAULT 0,
     review_count INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ DEFAULT NOW()
@@ -46,6 +47,8 @@ CREATE TABLE reviews (
 -- Indexes for common queries
 CREATE INDEX ix_users_email ON users(email);
 CREATE INDEX idx_profiles_name ON profiles USING gin(to_tsvector('english', name));
+CREATE INDEX idx_profiles_name_lower_prefix ON profiles (lower(name) text_pattern_ops);
+CREATE UNIQUE INDEX idx_profiles_linkedin_url ON profiles(linkedin_url) WHERE linkedin_url IS NOT NULL;
 CREATE INDEX idx_profiles_company ON profiles USING gin(to_tsvector('english', company));
 CREATE INDEX idx_profiles_role ON profiles USING gin(to_tsvector('english', role));
 CREATE INDEX idx_profiles_location ON profiles USING gin(to_tsvector('english', location));

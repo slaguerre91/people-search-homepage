@@ -104,8 +104,6 @@ function App() {
   const [verificationStatus, setVerificationStatus] = useState(null);
   const [showVerifyPrompt, setShowVerifyPrompt] = useState(false);
   const [draft, setDraft] = useState(null);
-  const [existingMatches, setExistingMatches] = useState([]);
-  const [selectedExistingId, setSelectedExistingId] = useState('');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [authMode, setAuthMode] = useState(null);
@@ -252,23 +250,15 @@ function App() {
       company,
       role: cleanRole(result.title, name),
       location,
-      bio: result.url ? `LinkedIn profile: ${result.url}` : '',
-      url: result.url || '',
+      bio: '',
+      linkedin_url: result.url || '',
     };
   }
 
   async function startLinkedInReview(result) {
     const nextDraft = buildLinkedInDraft(result);
     setDraft(nextDraft);
-    setSelectedExistingId('new');
-    setExistingMatches([]);
     setView('linkedin-review');
-    try {
-      const matches = await searchDatabase(nextDraft.name);
-      setExistingMatches(matches.slice(0, 5));
-    } catch {
-      setExistingMatches([]);
-    }
   }
 
   async function submitReview(profileId, rating, comment) {
@@ -313,10 +303,10 @@ function App() {
         role: draft.role,
         location: draft.location,
         bio: draft.bio,
+        linkedin_url: draft.linkedin_url,
       },
       review: { rating, comment },
     };
-    if (selectedExistingId && selectedExistingId !== 'new') payload.existing_profile_id = selectedExistingId;
 
     const res = await fetch(`${API_BASE}/linkedin/reviews`, {
       method: 'POST',
@@ -341,25 +331,6 @@ function App() {
     setProfile(savedProfile);
     setView('profile');
     return true;
-  }
-
-  async function createProfileFromNoResult() {
-    const name = query.trim();
-    if (!name) return;
-    const company = window.prompt('Company name?');
-    if (!company) return;
-    const location = window.prompt('Location?') || 'Unknown';
-    const role = 'Leader';
-    const res = await fetch(`${API_BASE}/profiles`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, company, role, location, bio: '' }),
-    });
-    if (res.ok) {
-      const created = await res.json();
-      setProfile(created);
-      setView('profile');
-    }
   }
 
   async function submitProfileVerification(profileId, profilePhoto, badgePhoto) {
@@ -445,7 +416,6 @@ function App() {
             onManualLinkedIn={() => searchLinkedIn(query)}
             onProfile={openProfile}
             onLinkedInReview={startLinkedInReview}
-            onAddLeader={createProfileFromNoResult}
           />
         )}
 
@@ -463,9 +433,6 @@ function App() {
         {view === 'linkedin-review' && draft && (
           <LinkedInReviewView
             draft={draft}
-            matches={existingMatches}
-            selectedExistingId={selectedExistingId}
-            onSelectExisting={setSelectedExistingId}
             onBack={() => setView('search')}
             onSubmit={submitLinkedInReview}
             signedIn={signedIn}
@@ -533,7 +500,6 @@ function SearchView({
   onManualLinkedIn,
   onProfile,
   onLinkedInReview,
-  onAddLeader,
 }) {
   const hasQuery = query.trim().length > 0;
   const noSavedResults = hasQuery && !loading && dbResults.length === 0;
@@ -629,7 +595,6 @@ function SearchView({
         <section className="empty-state">
           <p>We didn't find any leader by that name... yet.</p>
           <button className="btn primary" onClick={onManualLinkedIn}>Search LinkedIn</button>
-          <button className="btn secondary" onClick={onAddLeader}>Add Leader</button>
         </section>
       )}
 
@@ -643,11 +608,17 @@ function SearchView({
           {linkedInResults.map((result) => {
             const company = cleanCompany(result.company || linkedInMeta.parsedCompany || '', result.name);
             const name = cleanName(result.name, company);
+            const hasSavedProfile = Boolean(result.existing_profile_id);
             return (
               <article className="linkedin-card" key={result.url}>
                 <a href={result.url} target="_blank" rel="noreferrer">{name}</a>
                 <p>{company}</p>
-                <button className="btn primary small" onClick={() => onLinkedInReview(result)}>Review</button>
+                <button
+                  className="btn primary small"
+                  onClick={() => hasSavedProfile ? onProfile(result.existing_profile_id) : onLinkedInReview(result)}
+                >
+                  {hasSavedProfile ? 'View Saved Profile' : 'Review'}
+                </button>
               </article>
             );
           })}
@@ -687,7 +658,7 @@ function ProfileView({ profile, onBack, onReview, signedIn, onLogin, message }) 
   const company = cleanCompany(profile.company, profile.name);
   const name = cleanName(profile.name, company);
   const average = profile.average_rating || 0;
-  const linkedinUrl = linkedInUrlFromBio(profile.bio);
+  const linkedinUrl = profile.linkedin_url || linkedInUrlFromBio(profile.bio);
 
   return (
     <section className="profile-page">
@@ -737,18 +708,12 @@ function ProfileView({ profile, onBack, onReview, signedIn, onLogin, message }) 
 
 function LinkedInReviewView({
   draft,
-  matches,
-  selectedExistingId,
-  onSelectExisting,
   onBack,
   onSubmit,
   signedIn,
   onLogin,
   message,
 }) {
-  const creatingNew = selectedExistingId === 'new';
-  const submitLabel = creatingNew ? 'Save New Profile and Review' : 'Review Existing Profile';
-
   return (
     <section className="profile-page">
       <button className="back-link" onClick={onBack}>← Back to Search</button>
@@ -757,43 +722,11 @@ function LinkedInReviewView({
         <strong>{draft.name}</strong>
         <p>{draft.company}</p>
         <p>{draft.location}</p>
-        {draft.url && <a href={draft.url} target="_blank" rel="noreferrer">View LinkedIn profile</a>}
+        {draft.linkedin_url && <a href={draft.linkedin_url} target="_blank" rel="noreferrer">View LinkedIn profile</a>}
       </article>
 
-      <section className="matches-card">
-        <h2>Review Target</h2>
-        <label className={`choice-row ${creatingNew ? 'selected' : ''}`}>
-          <input
-            type="radio"
-            name="profile-choice"
-            checked={creatingNew}
-            onChange={() => onSelectExisting('new')}
-          />
-          <span>
-            <strong>Create a new profile</strong>
-            <small>{draft.name} · {draft.company}</small>
-          </span>
-        </label>
-
-        {matches.length ? matches.map((match) => (
-          <label className={`choice-row ${selectedExistingId === match.id ? 'selected' : ''}`} key={match.id}>
-            <input
-              type="radio"
-              name="profile-choice"
-              checked={selectedExistingId === match.id}
-              onChange={() => onSelectExisting(match.id)}
-            />
-            <span>
-              <strong>Use existing profile: {cleanName(match.name, match.company)}</strong>
-              <small>{cleanCompany(match.company, match.name)} · {match.location}</small>
-              <small>{reviewSummary(match)}</small>
-            </span>
-          </label>
-        )) : <p className="muted">No saved profiles matched this person.</p>}
-      </section>
-
       {message && <p className="notice">{message}</p>}
-      <ReviewForm signedIn={signedIn} onLogin={onLogin} onSubmit={onSubmit} submitLabel={submitLabel} />
+      <ReviewForm signedIn={signedIn} onLogin={onLogin} onSubmit={onSubmit} submitLabel="Save New Profile and Review" />
     </section>
   );
 }

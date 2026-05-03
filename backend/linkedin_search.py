@@ -4,6 +4,7 @@ import os
 import re
 import json
 from typing import Optional
+from uuid import UUID
 from ddgs import DDGS
 from pydantic import BaseModel
 from query_parser import parse_search_query
@@ -27,6 +28,9 @@ class LinkedInProfile(BaseModel):
     url: str
     snippet: Optional[str] = None
     match_score: int = 0  # 0-100, higher = better match
+    existing_profile_id: Optional[UUID] = None
+    existing_profile_review_count: int = 0
+    existing_profile_average_rating: Optional[float] = None
 
 
 class LinkedInSearchResult(BaseModel):

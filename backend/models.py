@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 from typing import Optional
-from sqlalchemy import String, Integer, ForeignKey, DateTime, UniqueConstraint, Boolean, text
+from sqlalchemy import String, Integer, ForeignKey, DateTime, UniqueConstraint, Boolean, Index, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -40,6 +40,7 @@ class Profile(Base):
     role: Mapped[str] = mapped_column(String(100), nullable=False)
     location: Mapped[str] = mapped_column(String(100), nullable=False)
     bio: Mapped[str] = mapped_column(String(500), default="")
+    linkedin_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     avatar_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     is_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
     verification_status: Mapped[str] = mapped_column(String(50), nullable=False, default="unverified", server_default=text("'unverified'"))
@@ -48,6 +49,15 @@ class Profile(Base):
     total_review_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
     review_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+
+    __table_args__ = (
+        Index(
+            "idx_profiles_linkedin_url",
+            "linkedin_url",
+            unique=True,
+            postgresql_where=linkedin_url.is_not(None),
+        ),
+    )
 
     # Relationship to reviews
     reviews: Mapped[list["Review"]] = relationship("Review", back_populates="profile", cascade="all, delete-orphan")

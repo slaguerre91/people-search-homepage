@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException, Query, Depends, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, or_, and_, update
+from sqlalchemy import select, or_, and_, update, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 from uuid import UUID
@@ -157,6 +157,16 @@ def _autocomplete_name_company_candidates(query: str) -> list[tuple[str, str]]:
     return parse_name_company_candidates(query)
 
 
+def _profile_name_prefix_condition(prefix: str):
+    escaped_prefix = (
+        prefix.lower()
+        .replace("\\", "\\\\")
+        .replace("%", "\\%")
+        .replace("_", "\\_")
+    )
+    return func.lower(Profile.name).like(f"{escaped_prefix}%", escape="\\")
+
+
 def _autocomplete_match_score(profile: Profile, query: str, candidates: list[tuple[str, str]]) -> int:
     clean_query = _clean_autocomplete_part(query).lower()
     profile_name = profile.name.lower()
@@ -192,10 +202,10 @@ async def autocomplete_names(q: str = Query(default="", max_length=100), db: Asy
         return []
 
     name_company_candidates = _autocomplete_name_company_candidates(clean_query)
-    conditions = [Profile.name.ilike(f"{clean_query}%")]
+    conditions = [_profile_name_prefix_condition(clean_query)]
     conditions.extend(
         and_(
-            Profile.name.ilike(f"{name}%"),
+            _profile_name_prefix_condition(name),
             Profile.company.ilike(f"%{company}%"),
         )
         for name, company in name_company_candidates
@@ -270,15 +280,17 @@ async def search_people(
     conditions = []
     candidate_conditions = [
         and_(
-            Profile.name.ilike(f"%{name}%"),
+            _profile_name_prefix_condition(name),
             Profile.company.ilike(f"%{company}%"),
         )
         for name, company in name_company_candidates
     ]
     
-    if parsed.name:
+    if parsed.name and parsed.company:
+        conditions.append(_profile_name_prefix_condition(parsed.name))
+    elif parsed.name:
         conditions.append(Profile.name.ilike(f"%{parsed.name}%"))
-    
+
     if parsed.company:
         conditions.append(Profile.company.ilike(f"%{parsed.company}%"))
     
@@ -323,11 +335,10 @@ async def create_profile(
     db: AsyncSession = Depends(get_db)
 ):
     """Create a new profile."""
-    profile = Profile(**data.model_dump())
-    db.add(profile)
-    await db.flush()
-    await db.refresh(profile)
-    return profile
+    raise HTTPException(
+        status_code=400,
+        detail="Profiles must be created from LinkedIn search results",
+    )
 
 
 @app.get("/profiles/{profile_id}", response_model=ProfileResponse)
@@ -514,6 +525,20 @@ def clean_linkedin_role(role: str, name: str) -> str:
     return value or "LinkedIn Member"
 
 
+def normalize_linkedin_url(url: Optional[str]) -> Optional[str]:
+    """Canonicalize LinkedIn profile URLs for duplicate checks."""
+    if not url:
+        return None
+    value = url.strip()
+    match = re.search(r"(?:https?://)?(?:[a-z]{2,3}\.)?linkedin\.com/in/([^/?#\s]+)", value, re.IGNORECASE)
+    if not match:
+        return None
+    slug = match.group(1).strip().strip("/")
+    if not slug:
+        return None
+    return f"https://www.linkedin.com/in/{slug.lower()}"
+
+
 @app.post("/linkedin/reviews", response_model=ProfileResponse, status_code=201)
 async def create_linkedin_profile_review(
     data: LinkedInReviewCreate,
@@ -522,24 +547,48 @@ async def create_linkedin_profile_review(
 ):
     """Create a profile from LinkedIn result data, or use a profile the user chose."""
     profile_data = data.profile
+    linkedin_url = normalize_linkedin_url(profile_data.linkedin_url)
     cleaned_profile_data = profile_data.model_copy(
         update={
             "company": clean_linkedin_company(profile_data.company, profile_data.name)[:100],
             "role": clean_linkedin_role(profile_data.role, profile_data.name)[:100],
+            "linkedin_url": linkedin_url,
         }
     )
 
     if data.existing_profile_id:
+        if linkedin_url:
+            url_owner_result = await db.execute(
+                select(Profile.id).where(Profile.linkedin_url == linkedin_url)
+            )
+            url_owner_id = url_owner_result.scalar_one_or_none()
+            if url_owner_id and url_owner_id != data.existing_profile_id:
+                raise HTTPException(status_code=409, detail="A profile already exists for this LinkedIn URL")
+
         result = await db.execute(
             select(Profile).where(Profile.id == data.existing_profile_id)
         )
         profile = result.scalar_one_or_none()
         if not profile:
             raise HTTPException(status_code=404, detail="Profile not found")
+        if linkedin_url and not profile.linkedin_url:
+            profile.linkedin_url = linkedin_url
     else:
+        if not linkedin_url:
+            raise HTTPException(status_code=400, detail="A LinkedIn profile URL is required")
+
+        existing_result = await db.execute(
+            select(Profile).where(Profile.linkedin_url == linkedin_url)
+        )
+        if existing_result.scalar_one_or_none():
+            raise HTTPException(status_code=409, detail="A profile already exists for this LinkedIn URL")
+
         profile = Profile(**cleaned_profile_data.model_dump())
         db.add(profile)
-        await db.flush()
+        try:
+            await db.flush()
+        except IntegrityError:
+            raise HTTPException(status_code=409, detail="A profile already exists for this LinkedIn URL")
 
     existing_review_result = await db.execute(
         select(Review.id).where(
@@ -581,7 +630,8 @@ async def create_linkedin_profile_review(
 
 @app.get("/search/linkedin", response_model=LinkedInSearchResult)
 async def linkedin_search(
-    q: str = Query(..., min_length=1, max_length=200)
+    q: str = Query(..., min_length=1, max_length=200),
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Search for LinkedIn profiles using DuckDuckGo (free, no API key).
@@ -589,6 +639,26 @@ async def linkedin_search(
     """
     try:
         result = await search_linkedin(q, max_results=20)
+        normalized_urls = {
+            normalize_linkedin_url(profile.url)
+            for profile in result.profiles
+        }
+        normalized_urls.discard(None)
+        if normalized_urls:
+            profile_result = await db.execute(
+                select(Profile).where(Profile.linkedin_url.in_(normalized_urls))
+            )
+            profiles_by_url = {
+                profile.linkedin_url: profile
+                for profile in profile_result.scalars().all()
+                if profile.linkedin_url
+            }
+            for linkedin_profile in result.profiles:
+                existing_profile = profiles_by_url.get(normalize_linkedin_url(linkedin_profile.url))
+                if existing_profile:
+                    linkedin_profile.existing_profile_id = existing_profile.id
+                    linkedin_profile.existing_profile_review_count = existing_profile.review_count
+                    linkedin_profile.existing_profile_average_rating = existing_profile.average_rating
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
