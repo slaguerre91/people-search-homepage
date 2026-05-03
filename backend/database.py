@@ -4,11 +4,10 @@ import os
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
 
-# Database URL - defaults to local dev, override with env var in production
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql+asyncpg://samyrlaguerre@localhost:5432/people_search"
-)
+# Database URL is required so every environment explicitly chooses its database.
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL environment variable is required")
 
 # Create async engine
 engine = create_async_engine(DATABASE_URL, echo=False)
