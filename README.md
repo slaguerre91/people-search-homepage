@@ -20,3 +20,9 @@ cd backend
 pip install -r requirements.txt
 uvicorn main:app --reload
 ```
+
+Profile verification uploads use Cloudinary. Set this in `backend/.env`:
+
+```bash
+CLOUDINARY_URL=cloudinary://your-api-key:your-api-secret@your-cloud-name
+```

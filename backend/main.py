@@ -3,11 +3,12 @@
 
 # Load environment variables from .env file (must be before other imports)
 from dotenv import load_dotenv
-load_dotenv()
+from pathlib import Path
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
 from fastapi import FastAPI, HTTPException, Query, Depends, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_, and_, update, func
 from sqlalchemy.exc import IntegrityError
@@ -38,22 +39,29 @@ from linkedin_search import (
 )
 import jwt
 
+import cloudinary
+import cloudinary.uploader
+from cloudinary.exceptions import Error as CloudinaryError
 from passlib.context import CryptContext
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi import status
 import os
+import io
 import re
-from pathlib import Path
 from datetime import timedelta, datetime
 from typing import Optional
 
 # Initialize FastAPI app immediately after imports
 app = FastAPI(title="People Search API", version="0.4.0")
 
-UPLOAD_ROOT = Path(os.getenv("UPLOAD_ROOT", Path(__file__).resolve().parent / "uploads"))
-PROFILE_VERIFICATION_UPLOAD_ROOT = UPLOAD_ROOT / "profile-verifications"
-PROFILE_VERIFICATION_UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
-app.mount("/uploads", StaticFiles(directory=str(UPLOAD_ROOT)), name="uploads")
+cloudinary_config = {"secure": True}
+if not os.getenv("CLOUDINARY_URL"):
+    cloudinary_config.update(
+        cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME"),
+        api_key=os.getenv("CLOUDINARY_API_KEY"),
+        api_secret=os.getenv("CLOUDINARY_API_SECRET"),
+    )
+cloudinary.config(**cloudinary_config)
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 SECRET_KEY = os.getenv("JWT_SECRET", "dev-secret-key")
@@ -386,10 +394,33 @@ async def save_verification_image(file: UploadFile, prefix: str, user_id: UUID) 
     if len(contents) > MAX_VERIFICATION_IMAGE_BYTES:
         raise HTTPException(status_code=400, detail="Images must be 5MB or smaller")
 
-    filename = f"{prefix}-{user_id}-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}-{os.urandom(4).hex()}{extension}"
-    path = PROFILE_VERIFICATION_UPLOAD_ROOT / filename
-    path.write_bytes(contents)
-    return f"/uploads/profile-verifications/{filename}"
+    if not all((cloudinary.config().cloud_name, cloudinary.config().api_key, cloudinary.config().api_secret)):
+        raise HTTPException(status_code=500, detail="Cloudinary storage is not configured")
+
+    public_id = f"{prefix}-{user_id}-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}-{os.urandom(4).hex()}"
+    folder = (
+        "sumoimperium/profile-pictures"
+        if prefix == "profile"
+        else "sumoimperium/profile-verifications"
+    )
+
+    try:
+        result = await run_in_threadpool(
+            cloudinary.uploader.upload,
+            io.BytesIO(contents),
+            folder=folder,
+            public_id=public_id,
+            resource_type="image",
+            overwrite=False,
+            type="upload",
+        )
+    except CloudinaryError as exc:
+        raise HTTPException(status_code=502, detail="Could not upload image") from exc
+
+    secure_url = result.get("secure_url")
+    if not secure_url:
+        raise HTTPException(status_code=502, detail="Cloudinary did not return an image URL")
+    return secure_url
 
 
 @app.post("/profiles/{profile_id}/verify", response_model=ProfileVerificationResponse, status_code=201)
@@ -405,11 +436,12 @@ async def verify_profile(
     profile = result.scalar_one_or_none()
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
+    if profile.is_verified:
+        raise HTTPException(status_code=409, detail="This profile has already been verified")
 
     existing_result = await db.execute(
         select(Profile).where(
             Profile.verified_by_user_id == current_user.id,
-            Profile.id != profile_id,
         )
     )
     if existing_result.scalar_one_or_none():
@@ -432,7 +464,10 @@ async def verify_profile(
     profile.verification_status = "self_verified"
     profile.verified_at = datetime.utcnow()
     profile.verified_by_user_id = current_user.id
-    await db.flush()
+    try:
+        await db.flush()
+    except IntegrityError:
+        raise HTTPException(status_code=409, detail="This profile or user has already been verified")
     await db.refresh(verification)
 
     result = await db.execute(

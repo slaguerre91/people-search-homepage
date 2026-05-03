@@ -94,6 +94,10 @@ class Review(Base):
 class LeaderProfileVerification(Base):
     """Verification submission for a leader profile."""
     __tablename__ = "leader_profile_verifications"
+    __table_args__ = (
+        UniqueConstraint("profile_id", name="uq_leader_profile_verifications_profile_id"),
+        UniqueConstraint("user_id", name="uq_leader_profile_verifications_user_id"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     profile_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False)

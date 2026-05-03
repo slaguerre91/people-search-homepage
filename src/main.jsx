@@ -76,11 +76,33 @@ function assetUrl(path) {
   return `${API_BASE}${path}`;
 }
 
-function ProfileAvatar({ name, avatarUrl, className = '' }) {
+const PROFILE_IMAGE_TRANSFORMS = {
+  autocomplete: 'c_fill,g_face,w_48,h_48,f_auto,q_auto',
+  search: 'c_fill,g_face,w_80,h_80,f_auto,q_auto',
+  profile: 'c_fill,g_face,w_240,h_240,f_auto,q_auto',
+};
+
+function profileImageUrl(path, size = 'search') {
+  const url = assetUrl(path);
+  const transform = PROFILE_IMAGE_TRANSFORMS[size];
+  if (!url || !transform) return url;
+
+  try {
+    const parsed = new URL(url);
+    if (!/res\.cloudinary\.com$/i.test(parsed.hostname)) return url;
+    if (!parsed.pathname.includes('/image/upload/')) return url;
+    parsed.pathname = parsed.pathname.replace('/image/upload/', `/image/upload/${transform}/`);
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+
+function ProfileAvatar({ name, avatarUrl, className = '', size = 'search' }) {
   const initial = cleanName(name).slice(0, 1).toUpperCase() || '?';
   return (
     <span className={`profile-thumb ${className}`.trim()} aria-hidden="true">
-      {avatarUrl ? <img src={assetUrl(avatarUrl)} alt="" /> : initial}
+      {avatarUrl ? <img src={profileImageUrl(avatarUrl, size)} alt="" /> : initial}
     </span>
   );
 }
@@ -567,7 +589,12 @@ function SearchView({
                 onClick={() => onProfile(person.id)}
               >
                 <span className="row-main">
-                  <ProfileAvatar name={person.name} avatarUrl={person.avatar_url} className="profile-thumb-sm" />
+                  <ProfileAvatar
+                    name={person.name}
+                    avatarUrl={person.avatar_url}
+                    className="profile-thumb-sm"
+                    size="autocomplete"
+                  />
                   <span>
                     <strong>{cleanName(person.name, person.company)}</strong>
                     <small>{cleanCompany(person.company, person.name)}</small>
@@ -692,7 +719,7 @@ function ProfileView({ profile, onBack, onReview, signedIn, onLogin, message }) 
       <article className="leader-card">
         <div className="cover" />
         <div className="avatar">
-          {profile.avatar_url ? <img src={assetUrl(profile.avatar_url)} alt="" /> : name.slice(0, 1)}
+          {profile.avatar_url ? <img src={profileImageUrl(profile.avatar_url, 'profile')} alt="" /> : name.slice(0, 1)}
         </div>
         <div className="leader-info">
           <h1>
@@ -775,8 +802,13 @@ function VerifyProfileView({ onBack, onSearch, onSubmit, message }) {
     setSelectedProfile(null);
     try {
       const people = await onSearch(searchQuery);
-      setResults(people);
-      if (!people.length) setLocalMessage('No saved profiles matched that search.');
+      const unverifiedPeople = people.filter((person) => !person.is_verified);
+      setResults(unverifiedPeople);
+      if (!people.length) {
+        setLocalMessage('No saved profiles matched that search.');
+      } else if (!unverifiedPeople.length) {
+        setLocalMessage('All matching profiles are already verified.');
+      }
     } catch {
       setResults([]);
       setLocalMessage('Could not search saved profiles.');
