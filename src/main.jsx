@@ -242,7 +242,7 @@ function App() {
   }
 
   function buildLinkedInDraft(result) {
-    const company = cleanCompany(result.company || linkedInMeta.parsedCompany || '', result.name);
+    const company = cleanCompany(result.company || '', result.name);
     const name = cleanName(result.name, company);
     const location = result.location || 'Unknown';
     return {
@@ -606,7 +606,7 @@ function SearchView({
             </p>
           ) : null}
           {linkedInResults.map((result) => {
-            const company = cleanCompany(result.company || linkedInMeta.parsedCompany || '', result.name);
+            const company = cleanCompany(result.company || '', result.name);
             const name = cleanName(result.name, company);
             const hasSavedProfile = Boolean(result.existing_profile_id);
             return (

@@ -36,7 +36,7 @@ KNOWN_COMPANIES = {
     "procter", "p&g", "unilever", "pepsi", "pepsico", "coca-cola", "coke",
     "tyson", "sysco", "kraft", "general mills", "kellogg", "mondelez",
     "disney", "warner", "paramount", "fox", "nbc", "universal", "paramount",
-    "morgan stanley", "goldman", "blackrock", "fidelity", "schwab", "state street",
+    "morgan stanley", "goldman", "goldman sachs", "blackrock", "fidelity", "schwab", "state street",
     "american express", "amex", "visa", "mastercard", "paypal", "capital one",
     "prudential", "metlife", "aig", "allstate", "progressive", "travelers",
     "delta", "united airlines", "american airlines", "southwest", "jetblue",

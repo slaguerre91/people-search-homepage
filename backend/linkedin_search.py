@@ -41,6 +41,69 @@ class LinkedInSearchResult(BaseModel):
     parsed_company: Optional[str] = None
 
 
+def canonical_linkedin_url(url: str) -> str:
+    """Return a stable LinkedIn profile URL for dedupe and display."""
+    match = re.search(r"(?:https?://)?(?:[a-z]{2,3}\.)?linkedin\.com/in/([^/?#\s]+)", url or "", re.IGNORECASE)
+    if not match:
+        return url
+    return f"https://www.linkedin.com/in/{match.group(1).strip('/').lower()}"
+
+
+def _linkedin_slug(url: str) -> str:
+    match = re.search(r"linkedin\.com/in/([^/?#\s]+)", url or "", re.IGNORECASE)
+    return match.group(1).lower() if match else ""
+
+
+def _name_parts(value: Optional[str]) -> list[str]:
+    return re.findall(r"[a-z]+", (value or "").lower())
+
+
+def _name_matches_target(name: str, url: str, target_name: Optional[str]) -> bool:
+    """Allow common searches like Alex Tingle to match Alexander Tingle."""
+    target_parts = _name_parts(target_name)
+    if not target_parts:
+        return True
+
+    candidate_parts = _name_parts(name)
+    slug = _linkedin_slug(url)
+
+    for target_part in target_parts:
+        if any(
+            candidate_part.startswith(target_part) or target_part.startswith(candidate_part)
+            for candidate_part in candidate_parts
+        ):
+            continue
+        if target_part in slug:
+            continue
+        return False
+    return True
+
+
+def _company_in_result(profile: "LinkedInProfile", company: Optional[str], *, include_snippet: bool = True) -> bool:
+    if not company:
+        return False
+
+    company_lower = company.lower()
+    snippet = profile.snippet or ""
+    if not include_snippet:
+        snippet = ""
+    text = f"{profile.name} {profile.title or ''} {snippet}".lower()
+    if company_lower in {"linkedin", "linked in"}:
+        text = re.sub(r"\|\s*linkedin\b", "", text)
+        text = re.sub(r"\bview\b.*?\bprofile on linkedin\b", "", text)
+        text = re.sub(r"\bprofessional community\b.*", "", text)
+        return bool(re.search(r"\b(linkedin|linked in|linkedin corporation)\b", text))
+
+    return company_lower in text
+
+
+def _result_title_anchor(title: str) -> str:
+    """Use only the first LinkedIn profile segment from bundled search titles."""
+    title = re.split(r"\s*\|\s*LinkedIn\b", title or "", maxsplit=1, flags=re.IGNORECASE)[0]
+    title = re.split(r"\s*\.\.\.\s*", title, maxsplit=1)[0]
+    return title.strip()
+
+
 def parse_linkedin_result(result: dict) -> Optional[LinkedInProfile]:
     """Parse a DuckDuckGo search result into a LinkedIn profile."""
     url = result.get('href', '')
@@ -50,6 +113,9 @@ def parse_linkedin_result(result: dict) -> Optional[LinkedInProfile]:
     # Only process LinkedIn profile URLs
     if 'linkedin.com/in/' not in url:
         return None
+
+    url = canonical_linkedin_url(url)
+    title = _result_title_anchor(title)
     
     # Parse name from title (usually "Name - Title | LinkedIn" or "Name | LinkedIn")
     name = title
@@ -121,6 +187,30 @@ def _clean_metadata_value(value: Optional[str], max_length: int = 100) -> Option
     return value[:max_length]
 
 
+def _apply_conservative_metadata(
+    profile: LinkedInProfile,
+    cleaned: dict,
+    target_name: Optional[str],
+    target_company: Optional[str],
+) -> None:
+    """Apply model-cleaned fields only when they still fit the profile URL/title."""
+    name = _clean_metadata_value(cleaned.get("name"))
+    company = _clean_metadata_value(cleaned.get("company"))
+    location = _clean_metadata_value(cleaned.get("location"), max_length=100)
+
+    if name and _name_matches_target(name, profile.url, target_name):
+        profile.name = name
+    if company and _company_in_result(profile, company, include_snippet=False):
+        profile.company = company
+    elif target_company and _company_in_result(profile, target_company, include_snippet=False):
+        profile.company = target_company
+    if location:
+        profile.location = location
+
+    profile.snippet = None
+    profile.title = None
+
+
 async def clean_profiles_with_gpt(
     profiles: list[LinkedInProfile],
     query: str,
@@ -180,21 +270,7 @@ Rules:
         for i, cleaned in enumerate(cleaned_results):
             if i >= len(profiles) or not isinstance(cleaned, dict):
                 continue
-            name = _clean_metadata_value(cleaned.get("name"))
-            company = _clean_metadata_value(cleaned.get("company"))
-            location = _clean_metadata_value(cleaned.get("location"), max_length=100)
-
-            if name:
-                profiles[i].name = name
-            if company:
-                profiles[i].company = company
-            elif target_company:
-                profiles[i].company = target_company
-            if location:
-                profiles[i].location = location
-
-            profiles[i].snippet = None
-            profiles[i].title = None
+            _apply_conservative_metadata(profiles[i], cleaned, target_name, target_company)
     except Exception as e:
         print(f"GPT metadata cleanup failed: {e}")
 
@@ -209,21 +285,45 @@ def basic_rank_profiles(
     """Simple keyword-based ranking as fallback."""
     for p in profiles:
         score = 50  # Base score
-        text = f"{p.name} {p.title or ''} {p.snippet or ''}".lower()
+        slug = _linkedin_slug(p.url)
+        identity_text = f"{p.name} {slug}".lower()
         
         if target_name:
             name_parts = target_name.lower().split()
             for part in name_parts:
-                if part in p.name.lower():
+                if part in identity_text:
                     score += 15
+            if _name_matches_target(p.name, p.url, target_name):
+                score += 20
+            elif len(name_parts) > 1:
+                score -= 60
         
         if target_company:
-            if target_company.lower() in text:
-                score += 25
+            if _company_in_result(p, target_company, include_snippet=False):
+                score += 35
+            elif _company_in_result(p, target_company):
+                score += 10
+
+        if any(char.isdigit() for char in slug):
+            score -= 8
         
-        p.match_score = min(100, score)
+        p.match_score = score
     
     profiles.sort(key=lambda p: p.match_score, reverse=True)
+    return profiles
+
+
+def enrich_profiles_from_anchored_metadata(
+    profiles: list[LinkedInProfile],
+    target_company: Optional[str],
+) -> list[LinkedInProfile]:
+    """Fill display metadata only when it is present in the title/name anchor."""
+    if not target_company:
+        return profiles
+
+    for profile in profiles:
+        if not profile.company and _company_in_result(profile, target_company, include_snippet=False):
+            profile.company = target_company
     return profiles
 
 
@@ -282,16 +382,16 @@ async def search_linkedin(query: str, max_results: int = 10) -> LinkedInSearchRe
     target_name = parsed.name
     target_company = parsed.company
     
-    # Handle "LinkedIn" as company - user probably just wants to find the person
-    if target_company and target_company.lower() in ["linkedin", "linked in"]:
-        target_company = None
-    
     # Step 2: Build search queries - try multiple variations for better coverage
     search_queries = []
     
     if target_name and target_company:
         # Primary: name + company
         search_queries.append(f'"{target_name}" {target_company} site:linkedin.com/in')
+        search_queries.append(f'{target_name} {target_company} site:linkedin.com/in')
+        if target_company.lower() in ["linkedin", "linked in"]:
+            search_queries.append(f'"{target_name}" "at LinkedIn" site:linkedin.com/in')
+            search_queries.append(f'"{target_name}" "LinkedIn Corporation" site:linkedin.com/in')
         # Fallback: just name
         search_queries.append(f'"{target_name}" site:linkedin.com/in')
     elif target_name:
@@ -308,11 +408,12 @@ async def search_linkedin(query: str, max_results: int = 10) -> LinkedInSearchRe
     all_results = []
     seen_urls = set()
     
-    for search_query in search_queries:
+    searched_company_variants = target_name and target_company
+    for index, search_query in enumerate(search_queries):
         try:
             results = DDGS().text(search_query, max_results=max_results)
             for r in results:
-                url = r.get('href', '')
+                url = canonical_linkedin_url(r.get('href', ''))
                 if url and url not in seen_urls:
                     seen_urls.add(url)
                     all_results.append(r)
@@ -320,8 +421,10 @@ async def search_linkedin(query: str, max_results: int = 10) -> LinkedInSearchRe
             print(f"DuckDuckGo search failed for '{search_query}': {e}")
             continue
         
-        # Stop if we have enough results
-        if len(all_results) >= max_results * 2:
+        # Stop if we have enough results. For company searches, try all company
+        # variants first because quoted searches can miss nickname/full-name cases.
+        searched_company_queries = index >= len(search_queries) - 2
+        if len(all_results) >= max_results * 2 and (not searched_company_variants or searched_company_queries):
             break
     
     if not all_results:
@@ -345,6 +448,7 @@ async def search_linkedin(query: str, max_results: int = 10) -> LinkedInSearchRe
     if profiles and (target_name or target_company):
         profiles = basic_rank_profiles(profiles, target_name, target_company)
 
+    profiles = enrich_profiles_from_anchored_metadata(profiles, target_company)
     profiles = await clean_profiles_with_gpt(profiles, query, target_name, target_company)
     
     return LinkedInSearchResult(
