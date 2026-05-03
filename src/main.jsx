@@ -57,6 +57,19 @@ function linkedInUrlFromBio(bio) {
   return String(bio || '').match(/https?:\/\/(?:www\.)?linkedin\.com\/in\/[^\s]+/i)?.[0] || '';
 }
 
+function isLinkedInProfileUrl(value) {
+  const input = String(value || '').trim();
+  if (!input || /\s/.test(input)) return false;
+  try {
+    const url = new URL(/^https?:\/\//i.test(input) ? input : `https://${input}`);
+    const host = url.hostname.toLowerCase();
+    return (host === 'linkedin.com' || host === 'www.linkedin.com' || /^[a-z]{2,3}\.linkedin\.com$/i.test(host))
+      && /^\/in\/[A-Za-z0-9_.%-]+\/?$/i.test(url.pathname);
+  } catch {
+    return false;
+  }
+}
+
 function assetUrl(path) {
   if (!path) return '';
   if (/^https?:\/\//i.test(path)) return path;
@@ -193,6 +206,11 @@ function App() {
     setView('search');
     setSuggestionsOpen(false);
     try {
+      if (isLinkedInProfileUrl(searchQuery)) {
+        setDbResults([]);
+        await searchLinkedIn(searchQuery);
+        return;
+      }
       const people = await searchDatabase(searchQuery);
       if (searchQuery && !people.length) {
         await searchLinkedIn(searchQuery);
@@ -211,15 +229,22 @@ function App() {
     setMessage('');
     try {
       const res = await fetch(`${API_BASE}/search/linkedin?q=${encodeURIComponent(q)}`);
-      if (!res.ok) throw new Error('LinkedIn search failed');
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(error.detail || 'LinkedIn search failed');
+      }
       const data = await res.json();
-      setLinkedInResults(data.profiles || []);
+      const profiles = data.profiles || [];
+      setLinkedInResults(profiles);
       setLinkedInMeta({
         parsedName: data.parsed_name,
         parsedCompany: data.parsed_company,
       });
-    } catch {
-      setMessage('Could not search LinkedIn.');
+      if (profiles.some((profile) => profile.url_verification === 'unverified')) {
+        setMessage('We could not independently verify this LinkedIn URL. Open it to confirm before reviewing.');
+      }
+    } catch (error) {
+      setMessage(error.message || 'Could not search LinkedIn.');
     } finally {
       setLoading(false);
     }
@@ -591,7 +616,7 @@ function SearchView({
         </ResultSection>
       )}
 
-      {noSavedResults && !linkedInResults.length && (
+      {noSavedResults && !linkedInResults.length && !message && (
         <section className="empty-state">
           <p>We didn't find any leader by that name... yet.</p>
           <button className="btn primary" onClick={onManualLinkedIn}>Search LinkedIn</button>
@@ -606,7 +631,8 @@ function SearchView({
             </p>
           ) : null}
           {linkedInResults.map((result) => {
-            const company = cleanCompany(result.company || '', result.name);
+            const isUnverifiedUrl = result.url_verification === 'unverified';
+            const company = isUnverifiedUrl ? 'Unverified LinkedIn URL' : cleanCompany(result.company || '', result.name);
             const name = cleanName(result.name, company);
             const hasSavedProfile = Boolean(result.existing_profile_id);
             return (

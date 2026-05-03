@@ -28,7 +28,14 @@ from query_parser import (
     parse_search_query,
     ParsedQuery,
 )
-from linkedin_search import search_linkedin, LinkedInSearchResult
+from linkedin_search import (
+    InvalidLinkedInProfileUrl,
+    LinkedInProfile,
+    canonical_linkedin_url,
+    is_linkedin_profile_url,
+    search_linkedin,
+    LinkedInSearchResult,
+)
 import jwt
 
 from passlib.context import CryptContext
@@ -527,16 +534,23 @@ def clean_linkedin_role(role: str, name: str) -> str:
 
 def normalize_linkedin_url(url: Optional[str]) -> Optional[str]:
     """Canonicalize LinkedIn profile URLs for duplicate checks."""
-    if not url:
-        return None
-    value = url.strip()
-    match = re.search(r"(?:https?://)?(?:[a-z]{2,3}\.)?linkedin\.com/in/([^/?#\s]+)", value, re.IGNORECASE)
-    if not match:
-        return None
-    slug = match.group(1).strip().strip("/")
-    if not slug:
-        return None
-    return f"https://www.linkedin.com/in/{slug.lower()}"
+    return canonical_linkedin_url(url or "")
+
+
+def linkedin_profile_from_saved_profile(profile: Profile) -> LinkedInProfile:
+    return LinkedInProfile(
+        name=profile.name,
+        company=profile.company,
+        title=profile.role,
+        location=profile.location,
+        url=profile.linkedin_url or "",
+        snippet=None,
+        match_score=100,
+        existing_profile_id=profile.id,
+        existing_profile_review_count=profile.review_count,
+        existing_profile_average_rating=profile.average_rating,
+        url_verification="saved",
+    )
 
 
 @app.post("/linkedin/reviews", response_model=ProfileResponse, status_code=201)
@@ -630,7 +644,7 @@ async def create_linkedin_profile_review(
 
 @app.get("/search/linkedin", response_model=LinkedInSearchResult)
 async def linkedin_search(
-    q: str = Query(..., min_length=1, max_length=200),
+    q: str = Query(..., min_length=1, max_length=500),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -638,6 +652,20 @@ async def linkedin_search(
     Returns parsed profile information.
     """
     try:
+        canonical_url = normalize_linkedin_url(q)
+        if canonical_url and is_linkedin_profile_url(q):
+            profile_result = await db.execute(
+                select(Profile).where(Profile.linkedin_url == canonical_url)
+            )
+            existing_profile = profile_result.scalar_one_or_none()
+            if existing_profile:
+                return LinkedInSearchResult(
+                    profiles=[linkedin_profile_from_saved_profile(existing_profile)],
+                    query=q,
+                    parsed_name=existing_profile.name,
+                    parsed_company=existing_profile.company,
+                )
+
         result = await search_linkedin(q, max_results=20)
         normalized_urls = {
             normalize_linkedin_url(profile.url)
@@ -660,6 +688,8 @@ async def linkedin_search(
                     linkedin_profile.existing_profile_review_count = existing_profile.review_count
                     linkedin_profile.existing_profile_average_rating = existing_profile.average_rating
         return result
+    except InvalidLinkedInProfileUrl as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

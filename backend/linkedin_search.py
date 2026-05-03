@@ -4,8 +4,8 @@ import os
 import re
 import json
 from typing import Optional
+from urllib.parse import urlparse
 from uuid import UUID
-from ddgs import DDGS
 from pydantic import BaseModel
 from query_parser import parse_search_query
 
@@ -17,6 +17,14 @@ try:
         _openai_client = AsyncOpenAI()
 except ImportError:
     pass
+
+
+def _is_allowed_linkedin_host(host: str) -> bool:
+    return host in {"linkedin.com", "www.linkedin.com"} or bool(re.fullmatch(r"[a-z]{2,3}\.linkedin\.com", host))
+
+
+class InvalidLinkedInProfileUrl(ValueError):
+    """Raised when URL-shaped input is not a valid LinkedIn profile URL."""
 
 
 class LinkedInProfile(BaseModel):
@@ -31,6 +39,7 @@ class LinkedInProfile(BaseModel):
     existing_profile_id: Optional[UUID] = None
     existing_profile_review_count: int = 0
     existing_profile_average_rating: Optional[float] = None
+    url_verification: Optional[str] = None
 
 
 class LinkedInSearchResult(BaseModel):
@@ -41,12 +50,61 @@ class LinkedInSearchResult(BaseModel):
     parsed_company: Optional[str] = None
 
 
-def canonical_linkedin_url(url: str) -> str:
+def canonical_linkedin_url(url: str) -> Optional[str]:
     """Return a stable LinkedIn profile URL for dedupe and display."""
-    match = re.search(r"(?:https?://)?(?:[a-z]{2,3}\.)?linkedin\.com/in/([^/?#\s]+)", url or "", re.IGNORECASE)
-    if not match:
-        return url
-    return f"https://www.linkedin.com/in/{match.group(1).strip('/').lower()}"
+    if not url:
+        return None
+
+    value = url.strip()
+    if not re.match(r"^https?://", value, re.IGNORECASE):
+        value = f"https://{value}"
+
+    parsed = urlparse(value)
+    host = (parsed.netloc or "").lower()
+    if not _is_allowed_linkedin_host(host):
+        return None
+
+    path_parts = [part for part in parsed.path.split("/") if part]
+    if len(path_parts) < 2 or path_parts[0].lower() != "in":
+        return None
+
+    slug = path_parts[1].strip().strip("/")
+    if not slug or not re.fullmatch(r"[A-Za-z0-9_%.-]+", slug) or not re.search(r"[A-Za-z0-9]", slug):
+        return None
+
+    return f"https://www.linkedin.com/in/{slug.lower()}"
+
+
+def is_linkedin_profile_url(value: str) -> bool:
+    """Return true only for direct LinkedIn /in profile URLs."""
+    return canonical_linkedin_url(value) is not None
+
+
+def looks_like_linkedin_url(value: str) -> bool:
+    """Return true for direct URL input pointed at LinkedIn."""
+    trimmed = (value or "").strip()
+    if not trimmed or re.search(r"\s", trimmed) or "linkedin.com" not in trimmed.lower():
+        return False
+    if not re.match(r"^https?://", trimmed, re.IGNORECASE):
+        trimmed = f"https://{trimmed}"
+    parsed = urlparse(trimmed)
+    host = (parsed.netloc or "").lower()
+    return _is_allowed_linkedin_host(host)
+
+
+def looks_like_url_input(value: str) -> bool:
+    """Return true for single-token URL-shaped input."""
+    trimmed = (value or "").strip()
+    if not trimmed or re.search(r"\s", trimmed):
+        return False
+
+    if re.match(r"^https?://", trimmed, re.IGNORECASE):
+        parsed = urlparse(trimmed)
+        return bool(parsed.netloc)
+
+    parsed = urlparse(f"https://{trimmed}")
+    host = (parsed.netloc or "").lower()
+    return "." in host and bool(parsed.path.strip("/"))
 
 
 def _linkedin_slug(url: str) -> str:
@@ -111,10 +169,10 @@ def parse_linkedin_result(result: dict) -> Optional[LinkedInProfile]:
     snippet = result.get('body', '')
     
     # Only process LinkedIn profile URLs
-    if 'linkedin.com/in/' not in url:
+    url = canonical_linkedin_url(url)
+    if not url:
         return None
 
-    url = canonical_linkedin_url(url)
     title = _result_title_anchor(title)
     
     # Parse name from title (usually "Name - Title | LinkedIn" or "Name | LinkedIn")
@@ -327,36 +385,59 @@ def enrich_profiles_from_anchored_metadata(
     return profiles
 
 
-def extract_profile_from_url(url: str) -> Optional[LinkedInProfile]:
-    """Extract profile info from a direct LinkedIn URL."""
-    if 'linkedin.com/in/' not in url:
+def profile_from_url_slug(url: str) -> Optional[LinkedInProfile]:
+    """Create a URL-only profile result without claiming LinkedIn existence."""
+    canonical_url = canonical_linkedin_url(url)
+    if not canonical_url:
         return None
-    
-    # Extract the username/slug from the URL
-    match = re.search(r'linkedin\.com/in/([^/?]+)', url)
-    if not match:
-        return None
-    
-    slug = match.group(1)
-    
-    # Convert slug to readable name (e.g., "jonathan-n-laguerre" -> "Jonathan N Laguerre")
-    name_parts = slug.split('-')
-    # Filter out random ID suffixes (usually long hex strings at the end)
+
+    slug = _linkedin_slug(canonical_url)
+    name_parts = slug.split("-")
     name_parts = [p for p in name_parts if not (len(p) > 6 and p.isalnum() and any(c.isdigit() for c in p))]
-    name = ' '.join(part.capitalize() for part in name_parts if part)
-    
-    if not name:
-        name = "LinkedIn Member"
-    
+    name = " ".join(part.capitalize() for part in name_parts if part) or "LinkedIn Profile"
+
     return LinkedInProfile(
         name=name,
         company=None,
         title=None,
         location=None,
-        url=url if url.startswith('http') else f'https://www.linkedin.com/in/{slug}',
-        snippet="Direct URL - profile details available on LinkedIn",
-        match_score=100  # Direct URL = perfect match
+        url=canonical_url,
+        snippet=None,
+        match_score=100,
+        url_verification="unverified",
     )
+
+
+def search_profile_from_url(url: str) -> Optional[LinkedInProfile]:
+    """Return a direct URL profile only when search results confirm it exists."""
+    canonical_url = canonical_linkedin_url(url)
+    if not canonical_url:
+        return None
+
+    slug = _linkedin_slug(canonical_url)
+    queries = [
+        f'"{canonical_url}"',
+        f'"linkedin.com/in/{slug}" site:linkedin.com/in',
+    ]
+
+    for search_query in queries:
+        try:
+            from ddgs import DDGS
+            results = DDGS().text(search_query, max_results=5)
+        except Exception as e:
+            print(f"DuckDuckGo direct URL validation failed for '{search_query}': {e}")
+            continue
+
+        for result in results:
+            if canonical_linkedin_url(result.get("href", "")) != canonical_url:
+                continue
+            profile = parse_linkedin_result(result)
+            if profile:
+                profile.match_score = 100
+                profile.url_verification = "confirmed"
+                return profile
+
+    return None
 
 
 async def search_linkedin(query: str, max_results: int = 10) -> LinkedInSearchResult:
@@ -367,15 +448,25 @@ async def search_linkedin(query: str, max_results: int = 10) -> LinkedInSearchRe
     """
     
     # Step 0: Check if query is a direct LinkedIn URL
-    if 'linkedin.com/in/' in query:
-        profile = extract_profile_from_url(query.strip())
-        if profile:
-            return LinkedInSearchResult(
-                profiles=[profile],
-                query=query,
-                parsed_name=profile.name,
-                parsed_company=None
-            )
+    if is_linkedin_profile_url(query):
+        profile = search_profile_from_url(query.strip())
+        if not profile:
+            profile = profile_from_url_slug(query.strip())
+        return LinkedInSearchResult(
+            profiles=[profile] if profile else [],
+            query=query,
+            parsed_name=profile.name if profile else None,
+            parsed_company=None
+        )
+    if looks_like_url_input(query):
+        raise InvalidLinkedInProfileUrl("Enter a valid LinkedIn profile URL, like https://www.linkedin.com/in/name")
+    if looks_like_linkedin_url(query):
+        return LinkedInSearchResult(
+            profiles=[],
+            query=query,
+            parsed_name=None,
+            parsed_company=None
+        )
     
     # Step 1: Parse query to extract name and company
     parsed = await parse_search_query(query)
@@ -411,6 +502,7 @@ async def search_linkedin(query: str, max_results: int = 10) -> LinkedInSearchRe
     searched_company_variants = target_name and target_company
     for index, search_query in enumerate(search_queries):
         try:
+            from ddgs import DDGS
             results = DDGS().text(search_query, max_results=max_results)
             for r in results:
                 url = canonical_linkedin_url(r.get('href', ''))
