@@ -581,9 +581,11 @@ def linkedin_profile_from_saved_profile(profile: Profile) -> LinkedInProfile:
         url=profile.linkedin_url or "",
         snippet=None,
         match_score=100,
+        avatar_url=profile.avatar_url,
         existing_profile_id=profile.id,
         existing_profile_review_count=profile.review_count,
         existing_profile_average_rating=profile.average_rating,
+        existing_profile_avatar_url=profile.avatar_url,
         url_verification="saved",
     )
 
@@ -722,6 +724,8 @@ async def linkedin_search(
                     linkedin_profile.existing_profile_id = existing_profile.id
                     linkedin_profile.existing_profile_review_count = existing_profile.review_count
                     linkedin_profile.existing_profile_average_rating = existing_profile.average_rating
+                    linkedin_profile.avatar_url = existing_profile.avatar_url
+                    linkedin_profile.existing_profile_avatar_url = existing_profile.avatar_url
         return result
     except InvalidLinkedInProfileUrl as e:
         raise HTTPException(status_code=400, detail=str(e))
