@@ -6,7 +6,7 @@ import json
 from typing import Optional
 from ddgs import DDGS
 from pydantic import BaseModel
-from query_parser import parse_search_query, ParsedQuery
+from query_parser import parse_search_query
 
 # Initialize OpenAI client if available
 _openai_client = None
@@ -88,95 +88,6 @@ def parse_linkedin_result(result: dict) -> Optional[LinkedInProfile]:
         snippet=snippet[:200] if snippet else None,
         match_score=0
     )
-
-
-async def rank_profiles_with_gpt(
-    profiles: list[LinkedInProfile], 
-    target_name: Optional[str], 
-    target_company: Optional[str]
-) -> list[LinkedInProfile]:
-    """Use ChatGPT to score and rank profiles based on how well they match the search."""
-    if not _openai_client or not profiles:
-        return profiles
-    
-    if not target_name and not target_company:
-        return profiles
-    
-    # Build the ranking prompt
-    profiles_text = "\n".join([
-        f"{i+1}. Name: {p.name}, Title: {p.title or 'Unknown'}, Snippet: {p.snippet or 'None'}"
-        for i, p in enumerate(profiles[:15])  # Limit to avoid token overflow
-    ])
-    
-    target_desc = []
-    if target_name:
-        target_desc.append(f"Name: {target_name}")
-    if target_company:
-        target_desc.append(f"Company: {target_company}")
-    
-    prompt = f"""Score each LinkedIn profile on how well it matches the target person.
-    
-Target: {', '.join(target_desc)}
-
-Profiles:
-{profiles_text}
-
-IMPORTANT SCORING RULES:
-- Names must match EXACTLY (first AND last name). "Jonathan Laguerre" is NOT "Johnathan Laguerre" or "Jonathan Smith".
-- If company is specified, person should work there (check title/snippet).
-- Check the URL slug - it often contains the real name.
-
-Scoring guide:
-- 100 = Perfect match: exact name AND confirmed at target company
-- 80 = Strong match: exact name, company appears likely in title/snippet  
-- 60 = Good match: exact name, company unknown
-- 40 = Partial: slight name variation (e.g., "Jon" vs "Jonathan") with company match
-- 20 = Weak: only first OR last name matches
-- 0 = No match: different person
-
-Return ONLY a JSON array of scores in order, like: [85, 60, 40, ...]"""
-
-    try:
-        response = await _openai_client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "You are a profile matching expert. Return only valid JSON."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0,
-            max_tokens=200
-        )
-        
-        content = response.choices[0].message.content.strip()
-        
-        # Extract JSON array from response
-        if "```" in content:
-            content = content.split("```")[1]
-            if content.startswith("json"):
-                content = content[4:]
-        
-        # Find the array in the response
-        start = content.find("[")
-        end = content.rfind("]") + 1
-        if start >= 0 and end > start:
-            content = content[start:end]
-        
-        scores = json.loads(content)
-        
-        # Apply scores to profiles
-        for i, score in enumerate(scores):
-            if i < len(profiles):
-                profiles[i].match_score = min(100, max(0, int(score)))
-        
-        # Sort by score descending
-        profiles.sort(key=lambda p: p.match_score, reverse=True)
-        
-    except Exception as e:
-        print(f"GPT ranking failed: {e}")
-        # Fall back to basic ranking
-        profiles = basic_rank_profiles(profiles, target_name, target_company)
-    
-    return profiles
 
 
 def _extract_json_array(content: str):
@@ -347,7 +258,7 @@ def extract_profile_from_url(url: str) -> Optional[LinkedInProfile]:
 async def search_linkedin(query: str, max_results: int = 10) -> LinkedInSearchResult:
     """
     Search for LinkedIn profiles using DuckDuckGo.
-    Uses ChatGPT to parse query and rank results intelligently.
+    Uses local parsing for query generation and optional GPT cleanup for display metadata.
     Also supports direct LinkedIn URL input.
     """
     
@@ -426,12 +337,9 @@ async def search_linkedin(query: str, max_results: int = 10) -> LinkedInSearchRe
             if len(profiles) >= max_results * 2:
                 break
     
-    # Step 5: Rank profiles using GPT (or fallback to basic ranking)
+    # Step 5: Rank profiles locally, then optionally clean display metadata with GPT.
     if profiles and (target_name or target_company):
-        if _openai_client:
-            profiles = await rank_profiles_with_gpt(profiles, target_name, target_company)
-        else:
-            profiles = basic_rank_profiles(profiles, target_name, target_company)
+        profiles = basic_rank_profiles(profiles, target_name, target_company)
 
     profiles = await clean_profiles_with_gpt(profiles, query, target_name, target_company)
     

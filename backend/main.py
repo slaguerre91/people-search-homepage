@@ -22,7 +22,12 @@ from schemas import (
     UserCreate, UserLogin, UserResponse,
     VerificationStatusResponse, ProfileVerificationResponse
 )
-from query_parser import parse_search_query, ParsedQuery
+from query_parser import (
+    clean_query_part,
+    parse_name_company_candidates,
+    parse_search_query,
+    ParsedQuery,
+)
 from linkedin_search import search_linkedin, LinkedInSearchResult
 import jwt
 
@@ -143,21 +148,72 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Autocomplete endpoint: returns up to 8 name matches for autocomplete
+def _clean_autocomplete_part(value: str) -> str:
+    """Normalize user-typed autocomplete fragments."""
+    return clean_query_part(value)
+
+
+def _autocomplete_name_company_candidates(query: str) -> list[tuple[str, str]]:
+    return parse_name_company_candidates(query)
+
+
+def _autocomplete_match_score(profile: Profile, query: str, candidates: list[tuple[str, str]]) -> int:
+    clean_query = _clean_autocomplete_part(query).lower()
+    profile_name = profile.name.lower()
+    profile_company = profile.company.lower()
+    score = 0
+
+    if profile_name.startswith(clean_query):
+        score = max(score, 100 + len(clean_query))
+
+    for name, company in candidates:
+        name_l = name.lower()
+        company_l = company.lower()
+        if profile_name.startswith(name_l) and company_l in profile_company:
+            candidate_score = 200 + len(name_l) + len(company_l)
+            if profile_name == name_l:
+                candidate_score += 50
+            if profile_company.startswith(company_l):
+                candidate_score += 25
+            score = max(score, candidate_score)
+
+    return score
+
+
+# Autocomplete endpoint: returns up to 8 profile matches for autocomplete
 @app.get("/search/autocomplete")
 async def autocomplete_names(q: str = Query(default="", max_length=100), db: AsyncSession = Depends(get_db)):
     """
-    Return up to 8 profiles where name starts with the given prefix (case-insensitive).
-    Used for autocomplete suggestions.
+    Return up to 8 profiles matching a typed name prefix, with optional company
+    context such as "John Smith, Oracle" or "John Smith Oracle".
     """
-    if not q.strip():
+    clean_query = _clean_autocomplete_part(q)
+    if not clean_query:
         return []
+
+    name_company_candidates = _autocomplete_name_company_candidates(clean_query)
+    conditions = [Profile.name.ilike(f"{clean_query}%")]
+    conditions.extend(
+        and_(
+            Profile.name.ilike(f"{name}%"),
+            Profile.company.ilike(f"%{company}%"),
+        )
+        for name, company in name_company_candidates
+    )
+
     result = await db.execute(
         select(Profile)
-        .where(Profile.name.ilike(f"{q}%"))
-        .limit(8)
+        .where(or_(*conditions))
+        .limit(50)
     )
     profiles = result.scalars().all()
+    profiles.sort(
+        key=lambda profile: (
+            -_autocomplete_match_score(profile, clean_query, name_company_candidates),
+            profile.name.lower(),
+        )
+    )
+
     # Return only preview fields
     return [
         {
@@ -169,7 +225,7 @@ async def autocomplete_names(q: str = Query(default="", max_length=100), db: Asy
             "avatar_url": p.avatar_url,
             "is_verified": p.is_verified,
             "verification_status": p.verification_status,
-        } for p in profiles
+        } for p in profiles[:8]
     ]
 
 
@@ -191,7 +247,7 @@ async def search_people(
 ):
     """
     Search profiles by name and/or company.
-    Uses ChatGPT to parse queries like "John Smith, Oracle" or "John Smith Oracle".
+    Parses common name/company query shapes locally without calling an LLM.
     """
     if not q.strip():
         # Return all profiles
@@ -199,11 +255,26 @@ async def search_people(
         profiles = result.scalars().all()
         return profiles
     
-    # Parse the query using OpenAI
+    # Parse the query locally and build database-backed name/company splits.
     parsed = await parse_search_query(q)
+    clean_query = clean_query_part(q)
+    word_count = len(re.sub(r"\s*,\s*", " ", clean_query).split())
+    has_explicit_company_separator = "," in clean_query or any(
+        keyword in clean_query.lower() for keyword in (" at ", " from ", " @ ")
+    )
+    name_company_candidates = parse_name_company_candidates(q)
+    if word_count < 3 and not parsed.company and not has_explicit_company_separator:
+        name_company_candidates = []
     
     # Build query conditions based on parsed result
     conditions = []
+    candidate_conditions = [
+        and_(
+            Profile.name.ilike(f"%{name}%"),
+            Profile.company.ilike(f"%{company}%"),
+        )
+        for name, company in name_company_candidates
+    ]
     
     if parsed.name:
         conditions.append(Profile.name.ilike(f"%{parsed.name}%"))
@@ -211,30 +282,30 @@ async def search_people(
     if parsed.company:
         conditions.append(Profile.company.ilike(f"%{parsed.company}%"))
     
+    search_conditions = []
+    if candidate_conditions:
+        search_conditions.extend(candidate_conditions)
     if conditions:
-        if parsed.name and parsed.company:
-            # Both name AND company must match
-            result = await db.execute(
-                select(Profile).where(and_(*conditions))
-            )
-        else:
-            # Just one condition
-            result = await db.execute(
-                select(Profile).where(conditions[0])
-            )
-    else:
-        # Fallback: search all text fields with raw query
-        raw = parsed.raw_query.lower()
-        result = await db.execute(
-            select(Profile).where(
-                or_(
-                    Profile.name.ilike(f"%{raw}%"),
-                    Profile.company.ilike(f"%{raw}%"),
-                    Profile.role.ilike(f"%{raw}%"),
-                    Profile.location.ilike(f"%{raw}%")
-                )
+        search_conditions.append(and_(*conditions) if len(conditions) > 1 else conditions[0])
+
+    if search_conditions:
+        result = await db.execute(select(Profile).where(or_(*search_conditions)))
+        profiles = result.scalars().all()
+        if profiles:
+            return profiles
+
+    # Fallback: search all text fields with raw query
+    raw = parsed.raw_query.lower()
+    result = await db.execute(
+        select(Profile).where(
+            or_(
+                Profile.name.ilike(f"%{raw}%"),
+                Profile.company.ilike(f"%{raw}%"),
+                Profile.role.ilike(f"%{raw}%"),
+                Profile.location.ilike(f"%{raw}%")
             )
         )
+    )
     
     profiles = result.scalars().all()
     return profiles

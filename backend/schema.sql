@@ -72,6 +72,11 @@ INSERT INTO profiles (name, company, role, location, bio) VALUES
     ('Rachel Thompson', 'Meta', 'Research Scientist', 'Menlo Park, CA', 'AI and machine learning research.'),
     ('Brian White', 'Meta', 'Production Engineer', 'New York, NY', 'Infrastructure reliability.'),
     ('Nicole Harris', 'Meta', 'Product Designer', 'Seattle, WA', 'Instagram design systems.'),
+    ('Samyr Laguerre', 'City of Boston', 'Director of Civic Innovation', 'Boston, MA', 'Public sector leader focused on digital services and civic technology.'),
+    ('Samyr Laguerre', 'Meta', 'Product Strategy Lead', 'Menlo Park, CA', 'Leading platform strategy and community product initiatives.'),
+    ('Samyr Laguerre', 'Boston University', 'Technology Partnerships Director', 'Boston, MA', 'Building partnerships across research, technology, and community programs.'),
+    ('Samyr Laguerre', 'Oracle', 'Cloud Transformation Advisor', 'Austin, TX', 'Helping public agencies modernize cloud and data platforms.'),
+    ('Samyr Laguerre', 'Greater Boston Chamber of Commerce', 'Innovation Programs Lead', 'Boston, MA', 'Supporting regional innovation programs and business leadership networks.'),
     
     -- Enterprise Software
     ('Steven Clark', 'Salesforce', 'Technical Architect', 'San Francisco, CA', 'CRM platform specialist.'),
