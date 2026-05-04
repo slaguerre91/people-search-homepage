@@ -64,7 +64,9 @@ if not os.getenv("CLOUDINARY_URL"):
 cloudinary.config(**cloudinary_config)
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-SECRET_KEY = os.getenv("JWT_SECRET", "dev-secret-key")
+SECRET_KEY = os.getenv("JWT_SECRET")
+if not SECRET_KEY:
+    raise RuntimeError("JWT_SECRET environment variable is required")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 1 week
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
