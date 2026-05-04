@@ -1,8 +1,10 @@
 """LinkedIn profile search using DuckDuckGo (free, no API key required)."""
 
+import asyncio
 import os
 import re
 import json
+from time import perf_counter
 from typing import Optional
 from urllib.parse import urlparse
 from uuid import UUID
@@ -17,6 +19,15 @@ try:
         _openai_client = AsyncOpenAI()
 except ImportError:
     pass
+
+
+def _timing_enabled() -> bool:
+    return os.getenv("LINKEDIN_SEARCH_TIMING", "").lower() in {"1", "true", "yes", "on"}
+
+
+def _log_timing(message: str) -> None:
+    if _timing_enabled():
+        print(f"[linkedin-search timing] {message}")
 
 
 def _is_allowed_linkedin_host(host: str) -> bool:
@@ -271,6 +282,37 @@ def _apply_conservative_metadata(
     profile.title = None
 
 
+def _looks_like_noisy_metadata(profile: LinkedInProfile, target_name: Optional[str], target_company: Optional[str]) -> bool:
+    """Return true when local parsing likely needs model cleanup."""
+    name = (profile.name or "").strip()
+    title = (profile.title or "").strip()
+    snippet = profile.snippet or ""
+
+    if not name or name.lower() == "linkedin member":
+        return True
+    if len(name) > 70 or re.search(r"(\||\.\.\.|,| at | - )", name, re.IGNORECASE):
+        return True
+    if re.search(r"\b(profile|profiles|people|directory|linkedin|view)\b", name, re.IGNORECASE):
+        return True
+    if target_name and not _name_matches_target(name, profile.url, target_name):
+        return True
+    if title and (len(title) > 120 or re.search(r"(\||\.\.\.|view .* profile|people also viewed)", title, re.IGNORECASE)):
+        return True
+    if target_company and not profile.company and _company_in_result(profile, target_company):
+        return True
+    if re.search(r"\b\d+\s+others\b|\bprofiles?\b|\bpeople\b.*\blinkedin\b", snippet, re.IGNORECASE):
+        return True
+
+    return False
+
+
+def _strip_raw_snippets(profiles: list[LinkedInProfile]) -> list[LinkedInProfile]:
+    """Avoid returning noisy search-result snippets to the UI."""
+    for profile in profiles:
+        profile.snippet = None
+    return profiles
+
+
 async def clean_profiles_with_gpt(
     profiles: list[LinkedInProfile],
     query: str,
@@ -279,6 +321,15 @@ async def clean_profiles_with_gpt(
 ) -> list[LinkedInProfile]:
     """Use ChatGPT to produce conservative user-facing metadata."""
     if not _openai_client or not profiles:
+        _log_timing("openai cleanup skipped")
+        return profiles
+
+    profiles_to_clean = [
+        profile for profile in profiles[:10]
+        if _looks_like_noisy_metadata(profile, target_name, target_company)
+    ]
+    if not profiles_to_clean:
+        _log_timing("openai cleanup skipped; local metadata looked confident")
         return profiles
 
     results_text = "\n".join([
@@ -289,7 +340,7 @@ async def clean_profiles_with_gpt(
             f"Search snippet: {p.snippet or ''}",
             f"Parsed location: {p.location or ''}",
         ])
-        for i, p in enumerate(profiles[:10])
+        for i, p in enumerate(profiles_to_clean)
     ])
 
     prompt = f"""Clean LinkedIn search results for display in a review app.
@@ -315,6 +366,7 @@ Rules:
 - Use null for uncertain fields. Do not invent work history, education, role, or biography."""
 
     try:
+        started_at = perf_counter()
         response = await _openai_client.chat.completions.create(
             model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
             messages=[
@@ -324,13 +376,14 @@ Rules:
             temperature=0,
             max_tokens=900,
         )
+        _log_timing(f"openai cleanup completed in {perf_counter() - started_at:.2f}s")
         content = response.choices[0].message.content.strip()
         cleaned_results = _extract_json_array(content)
 
         for i, cleaned in enumerate(cleaned_results):
-            if i >= len(profiles) or not isinstance(cleaned, dict):
+            if i >= len(profiles_to_clean) or not isinstance(cleaned, dict):
                 continue
-            _apply_conservative_metadata(profiles[i], cleaned, target_name, target_company)
+            _apply_conservative_metadata(profiles_to_clean[i], cleaned, target_name, target_company)
     except Exception as e:
         print(f"GPT metadata cleanup failed: {e}")
 
@@ -442,12 +495,26 @@ def search_profile_from_url(url: str) -> Optional[LinkedInProfile]:
     return None
 
 
+async def search_duckduckgo(query: str, max_results: int) -> list[dict]:
+    """Run the blocking DuckDuckGo request off the event loop."""
+    try:
+        from ddgs import DDGS
+        started_at = perf_counter()
+        results = await asyncio.to_thread(lambda: list(DDGS().text(query, max_results=max_results)))
+        _log_timing(f"ddg query completed in {perf_counter() - started_at:.2f}s: {query!r} ({len(results)} raw results)")
+        return results
+    except Exception as e:
+        print(f"DuckDuckGo search failed for '{query}': {e}")
+        return []
+
+
 async def search_linkedin(query: str, max_results: int = 10) -> LinkedInSearchResult:
     """
     Search for LinkedIn profiles using DuckDuckGo.
     Uses local parsing for query generation and optional GPT cleanup for display metadata.
     Also supports direct LinkedIn URL input.
     """
+    total_started_at = perf_counter()
     
     # Step 0: Check if query is a direct LinkedIn URL
     if is_linkedin_profile_url(query):
@@ -471,7 +538,9 @@ async def search_linkedin(query: str, max_results: int = 10) -> LinkedInSearchRe
         )
     
     # Step 1: Parse query to extract name and company
+    parse_started_at = perf_counter()
     parsed = await parse_search_query(query)
+    _log_timing(f"query parsing completed in {perf_counter() - parse_started_at:.2f}s")
     target_name = parsed.name
     target_company = parsed.company
     
@@ -497,28 +566,24 @@ async def search_linkedin(query: str, max_results: int = 10) -> LinkedInSearchRe
         clean_query = re.sub(r'\blinkedin\b', '', query, flags=re.IGNORECASE).strip()
         search_queries.append(f'{clean_query} site:linkedin.com/in')
     
-    # Step 3: Search DuckDuckGo with multiple queries
+    # Step 3: Search DuckDuckGo with multiple queries in parallel
     all_results = []
     seen_urls = set()
-    
-    searched_company_variants = target_name and target_company
-    for index, search_query in enumerate(search_queries):
-        try:
-            from ddgs import DDGS
-            results = DDGS().text(search_query, max_results=max_results)
-            for r in results:
-                url = canonical_linkedin_url(r.get('href', ''))
-                if url and url not in seen_urls:
-                    seen_urls.add(url)
-                    all_results.append(r)
-        except Exception as e:
-            print(f"DuckDuckGo search failed for '{search_query}': {e}")
-            continue
-        
-        # Stop if we have enough results. For company searches, try all company
-        # variants first because quoted searches can miss nickname/full-name cases.
-        searched_company_queries = index >= len(search_queries) - 2
-        if len(all_results) >= max_results * 2 and (not searched_company_variants or searched_company_queries):
+
+    search_result_sets = await asyncio.gather(*[
+        search_duckduckgo(search_query, max_results)
+        for search_query in search_queries
+    ])
+    _log_timing(f"all ddg queries completed in {perf_counter() - total_started_at:.2f}s ({len(search_queries)} queries)")
+    for results in search_result_sets:
+        for r in results:
+            url = canonical_linkedin_url(r.get('href', ''))
+            if url and url not in seen_urls:
+                seen_urls.add(url)
+                all_results.append(r)
+            if len(all_results) >= max_results * 2:
+                break
+        if len(all_results) >= max_results * 2:
             break
     
     if not all_results:
@@ -530,6 +595,7 @@ async def search_linkedin(query: str, max_results: int = 10) -> LinkedInSearchRe
         )
     
     # Step 4: Parse results into profiles
+    local_started_at = perf_counter()
     profiles = []
     for result in all_results:
         profile = parse_linkedin_result(result)
@@ -541,9 +607,12 @@ async def search_linkedin(query: str, max_results: int = 10) -> LinkedInSearchRe
     # Step 5: Rank profiles locally, then optionally clean display metadata with GPT.
     if profiles and (target_name or target_company):
         profiles = basic_rank_profiles(profiles, target_name, target_company)
+    _log_timing(f"local parsing/ranking completed in {perf_counter() - local_started_at:.2f}s ({len(profiles)} profiles)")
 
     profiles = enrich_profiles_from_anchored_metadata(profiles, target_company)
     profiles = await clean_profiles_with_gpt(profiles, query, target_name, target_company)
+    profiles = _strip_raw_snippets(profiles)
+    _log_timing(f"total search completed in {perf_counter() - total_started_at:.2f}s")
     
     return LinkedInSearchResult(
         profiles=profiles[:max_results],
