@@ -159,6 +159,7 @@ async def get_my_verification_status(
 DEFAULT_CORS_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    "https://people-search-homepage.vercel.app",
     "https://people-search-homepage-3z9l58i6c-samyrmlaguerre-9019s-projects.vercel.app",
 ]
 CORS_ORIGINS = [
@@ -166,10 +167,15 @@ CORS_ORIGINS = [
     for origin in os.getenv("CORS_ORIGINS", ",".join(DEFAULT_CORS_ORIGINS)).split(",")
     if origin.strip()
 ]
+CORS_ORIGIN_REGEX = os.getenv(
+    "CORS_ORIGIN_REGEX",
+    r"^https://people-search-homepage(?:-[a-z0-9-]+)?\.vercel\.app$",
+)
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
+    allow_origin_regex=CORS_ORIGIN_REGEX,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
