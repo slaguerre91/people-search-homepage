@@ -21,6 +21,20 @@ pip install -r requirements.txt
 uvicorn main:app --reload
 ```
 
+Seed demo data:
+
+```bash
+python backend/seed_demo_data.py
+```
+
+The seed command is idempotent and creates common-name profiles, reviews, fake
+but valid LinkedIn-style URLs, and self-verified demo profiles. To upload demo
+profile and verification images into the configured Cloudinary account, run:
+
+```bash
+python backend/seed_demo_data.py --upload-images
+```
+
 Profile verification uploads use Cloudinary. Set this in `backend/.env`:
 
 ```bash
