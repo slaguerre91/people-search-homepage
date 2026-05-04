@@ -26,12 +26,14 @@ if config.config_file_name is not None:
 BACKEND_DIR = Path(__file__).resolve().parents[1] / "backend"
 load_dotenv(BACKEND_DIR / ".env")
 sys.path.append(str(BACKEND_DIR))
+from db_url import normalize_database_url
 from models import Base
 target_metadata = Base.metadata
 
 database_url = os.getenv("DATABASE_URL")
 if not database_url:
     raise RuntimeError("DATABASE_URL environment variable is required")
+database_url = normalize_database_url(database_url)
 
 config.set_main_option("sqlalchemy.url", database_url)
 

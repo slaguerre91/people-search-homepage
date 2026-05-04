@@ -4,10 +4,13 @@ import os
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
 
+from db_url import normalize_database_url
+
 # Database URL is required so every environment explicitly chooses its database.
 DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL environment variable is required")
+DATABASE_URL = normalize_database_url(DATABASE_URL)
 
 # Create async engine
 engine = create_async_engine(DATABASE_URL, echo=False)
