@@ -9,6 +9,8 @@ const EXAMPLE_SEARCHES = [
   'Maria Lopez at Google',
   'linkedin.com/in/name',
 ];
+const PROFILE_ROUTE_RE = /^\/profiles\/([^/]+)\/?$/;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function buildSampleReviews() {
   const names = [
@@ -46,6 +48,20 @@ function buildSampleReviews() {
 }
 
 const SAMPLE_REVIEWS = buildSampleReviews();
+
+function profileIdFromPath(pathname = window.location.pathname) {
+  const match = pathname.match(PROFILE_ROUTE_RE);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+function profilePath(id) {
+  return `/profiles/${encodeURIComponent(id)}`;
+}
+
+function setBrowserPath(path, { replace = false } = {}) {
+  if (window.location.pathname === path) return;
+  window.history[replace ? 'replaceState' : 'pushState']({}, '', path);
+}
 
 function getToken() {
   return localStorage.getItem('authToken');
@@ -253,6 +269,23 @@ function App() {
   }, [token]);
 
   useEffect(() => {
+    function syncViewToUrl() {
+      const profileId = profileIdFromPath();
+      if (!profileId) {
+        setProfile(null);
+        setDraft(null);
+        setView('search');
+        return;
+      }
+      openProfile(profileId, { updateUrl: false });
+    }
+
+    syncViewToUrl();
+    window.addEventListener('popstate', syncViewToUrl);
+    return () => window.removeEventListener('popstate', syncViewToUrl);
+  }, []);
+
+  useEffect(() => {
     if (!token) {
       setVerificationStatus(null);
       setShowVerifyPrompt(false);
@@ -428,17 +461,40 @@ function App() {
     });
   }
 
-  async function openProfile(id) {
+  function goHome({ replace = false, keepMessage = false } = {}) {
+    setBrowserPath('/', { replace });
+    setProfile(null);
+    setDraft(null);
+    if (!keepMessage) setMessage('');
+    setView('search');
+  }
+
+  async function openProfile(id, { updateUrl = true, replaceUrl = false } = {}) {
+    const normalizedId = String(id || '').trim();
+    if (!UUID_RE.test(normalizedId)) {
+      setProfile(null);
+      setMessage('Profile link is invalid.');
+      goHome({ replace: true, keepMessage: true });
+      return false;
+    }
+
     setLoading(true);
+    setMessage('');
     setSuggestionsOpen(false);
     try {
-      const res = await fetch(`${API_BASE}/profiles/${id}`);
-      if (!res.ok) throw new Error('Profile not found');
+      const res = await fetch(`${API_BASE}/profiles/${normalizedId}`);
+      if (res.status === 404) throw new Error('not-found');
+      if (!res.ok) throw new Error('load-failed');
       const data = await res.json();
       setProfile(data);
       setView('profile');
+      if (updateUrl) setBrowserPath(profilePath(normalizedId), { replace: replaceUrl });
+      return true;
     } catch {
-      setMessage('Profile not found.');
+      setProfile(null);
+      setMessage('Profile not found or could not be loaded.');
+      goHome({ replace: true, keepMessage: true });
+      return false;
     } finally {
       setLoading(false);
     }
@@ -532,6 +588,7 @@ function App() {
     }
     const savedProfile = await res.json();
     setProfile(savedProfile);
+    setBrowserPath(profilePath(savedProfile.id));
     setView('profile');
     return true;
   }
@@ -573,6 +630,7 @@ function App() {
     setVerificationStatus({ has_verified_profile: true, profile: data.profile });
     setShowVerifyPrompt(false);
     setProfile(data.profile);
+    setBrowserPath(profilePath(data.profile.id));
     setView('profile');
     return true;
   }
@@ -582,7 +640,7 @@ function App() {
     setProfile(null);
     setVerificationStatus(null);
     setShowVerifyPrompt(false);
-    setView('search');
+    goHome();
   }
 
   return (
@@ -592,7 +650,7 @@ function App() {
         onLogin={() => setAuthMode('login')}
         onSignup={() => setAuthMode('signup')}
         onSignOut={signOut}
-        onHome={() => setView('search')}
+        onHome={() => goHome()}
       />
 
       <main>
@@ -612,6 +670,7 @@ function App() {
             verifiedProfile={verificationStatus?.profile}
             onVerify={() => {
               setMessage('');
+              setBrowserPath('/');
               setView('verify-profile');
             }}
             onDismissVerify={() => setShowVerifyPrompt(false)}
@@ -625,7 +684,7 @@ function App() {
         {view === 'profile' && profile && (
           <ProfileView
             profile={profile}
-            onBack={() => setView('search')}
+            onBack={() => goHome()}
             onReview={submitReview}
             signedIn={signedIn}
             onLogin={() => setAuthMode('login')}
@@ -636,7 +695,7 @@ function App() {
         {view === 'linkedin-review' && draft && (
           <LinkedInReviewView
             draft={draft}
-            onBack={() => setView('search')}
+            onBack={() => goHome()}
             onSubmit={submitLinkedInReview}
             signedIn={signedIn}
             onLogin={() => setAuthMode('login')}
@@ -646,7 +705,7 @@ function App() {
 
         {view === 'verify-profile' && (
           <VerifyProfileView
-            onBack={() => setView('search')}
+            onBack={() => goHome()}
             onSearch={searchDatabase}
             onSubmit={submitProfileVerification}
             message={message}
