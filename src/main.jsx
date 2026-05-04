@@ -65,13 +65,44 @@ function cleanText(value) {
     .trim();
 }
 
+function isMissingMetadata(value) {
+  return !value || /^(unknown|n\/a|none|null|undefined)$/i.test(String(value).trim());
+}
+
+function toDisplayCase(value, { acronymWords = [], uppercaseTrailingRegion = false } = {}) {
+  const text = cleanText(value);
+  if (isMissingMetadata(text)) return '';
+  if (/[A-Z]/.test(text)) return text;
+  let result = text.replace(/\b[a-z][a-z'&-]*/g, (word) => {
+    const lower = word.toLowerCase();
+    if (acronymWords.includes(lower)) {
+      return lower.toUpperCase();
+    }
+    if (['of', 'and', 'or', 'the', 'at', 'in', 'for'].includes(lower)) return lower;
+    return lower.charAt(0).toUpperCase() + lower.slice(1);
+  }).replace(/^([a-z])/, (match) => match.toUpperCase());
+  if (uppercaseTrailingRegion) {
+    result = result.replace(/,\s*([A-Za-z]{2,3})$/, (_, region) => `, ${region.toUpperCase()}`);
+  }
+  return result;
+}
+
 function cleanCompany(company, name = '') {
   let value = cleanText(company);
+  if (isMissingMetadata(value)) return '';
   if (name && value.toLowerCase().includes(name.toLowerCase())) {
     value = value.slice(0, value.toLowerCase().indexOf(name.toLowerCase())).trim();
   }
   if (value.includes(' - ')) value = value.split(' - ')[0].trim();
-  return value || 'Unknown';
+  return toDisplayCase(value, { acronymWords: ['llc', 'inc', 'plc', 'gmbh'] });
+}
+
+function cleanLocation(location) {
+  return toDisplayCase(location, { uppercaseTrailingRegion: true });
+}
+
+function profileMetadataLine(company, location, name = '') {
+  return [cleanCompany(company, name), cleanLocation(location)].filter(Boolean).join(' · ');
 }
 
 function cleanName(name, company = '') {
@@ -414,8 +445,8 @@ function App() {
   }
 
   function buildLinkedInDraft(result) {
-    const company = cleanCompany(result.company || '', result.name);
-    const name = cleanName(result.name, company);
+    const company = result.company || 'Unknown';
+    const name = cleanName(result.name, cleanCompany(company, result.name));
     const location = result.location || 'Unknown';
     return {
       name,
@@ -739,10 +770,10 @@ function SearchView({
                   />
                   <span>
                     <strong>{cleanName(person.name, person.company)}</strong>
-                    <small>{cleanCompany(person.company, person.name)}</small>
+                    {cleanCompany(person.company, person.name) && <small>{cleanCompany(person.company, person.name)}</small>}
                   </span>
                 </span>
-                {person.location && <small>{person.location}</small>}
+                {cleanLocation(person.location) && <small>{cleanLocation(person.location)}</small>}
               </button>
             ))}
           </div>
@@ -823,7 +854,7 @@ function SearchView({
                     ) : (
                       <strong>{name}</strong>
                     )}
-                    <p>{company}</p>
+                    {company && <p>{company}</p>}
                     {hasSavedProfile && (
                       <small className="muted">
                         Saved profile · {rating == null ? 'No reviews yet' : `${Number(rating).toFixed(1)} (${reviewCount})`}
@@ -914,7 +945,11 @@ function ProfileResult({ profile, onClick }) {
         <ProfileAvatar name={name} avatarUrl={profile.avatar_url} />
         <span>
           <strong>{name}</strong>
-          <small>{company} {profile.is_verified ? <span className="verified-inline">Verified</span> : null}</small>
+          {(company || profile.is_verified) && (
+            <small>
+              {company} {profile.is_verified ? <span className="verified-inline">Verified</span> : null}
+            </small>
+          )}
         </span>
       </span>
       <span className="row-rating">{reviewSummary(profile)}</span>
@@ -925,6 +960,7 @@ function ProfileResult({ profile, onClick }) {
 function ProfileView({ profile, onBack, onReview, signedIn, onLogin, message }) {
   const company = cleanCompany(profile.company, profile.name);
   const name = cleanName(profile.name, company);
+  const location = cleanLocation(profile.location);
   const average = profile.average_rating || 0;
   const linkedinUrl = profile.linkedin_url || linkedInUrlFromBio(profile.bio);
 
@@ -941,8 +977,8 @@ function ProfileView({ profile, onBack, onReview, signedIn, onLogin, message }) 
             {name}
             {profile.is_verified && <span className="verified-badge" title="Verified leader profile">✓</span>}
           </h1>
-          <p>{company}</p>
-          <p>{profile.location}</p>
+          {company && <p>{company}</p>}
+          {location && <p>{location}</p>}
           <div className="rating-line">
             <Stars value={average} />
             <strong>{reviewSummary(profile)}</strong>
@@ -988,8 +1024,8 @@ function LinkedInReviewView({
       <article className="confirm-card">
         <h1>Confirm Leader</h1>
         <strong>{draft.name}</strong>
-        <p>{draft.company}</p>
-        <p>{draft.location}</p>
+        {cleanCompany(draft.company, draft.name) && <p>{cleanCompany(draft.company, draft.name)}</p>}
+        {cleanLocation(draft.location) && <p>{cleanLocation(draft.location)}</p>}
         {draft.linkedin_url && (
           <a className="linkedin-text-link" href={draft.linkedin_url} target="_blank" rel="noreferrer">
             <LinkedInIcon />
@@ -1076,7 +1112,9 @@ function VerifyProfileView({ onBack, onSearch, onSubmit, message }) {
                 />
                 <span>
                   <strong>{cleanName(person.name, person.company)}</strong>
-                  <small>{cleanCompany(person.company, person.name)} · {person.location}</small>
+                  {profileMetadataLine(person.company, person.location, person.name) && (
+                    <small>{profileMetadataLine(person.company, person.location, person.name)}</small>
+                  )}
                 </span>
               </label>
             ))}
