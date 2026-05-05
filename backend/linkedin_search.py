@@ -175,6 +175,16 @@ def _result_title_anchor(title: str) -> str:
     return title.strip()
 
 
+def _clean_location(value: str) -> Optional[str]:
+    """Keep snippet-derived location text from swallowing LinkedIn boilerplate."""
+    value = re.split(r"\.\s*View\b", value or "", maxsplit=1, flags=re.IGNORECASE)[0]
+    value = re.split(r"\bView\b.*\bprofile\b", value, maxsplit=1, flags=re.IGNORECASE)[0]
+    value = re.sub(r"\s+", " ", value).strip(" .,;:-\t\n\r")
+    if not value or "{" in value or "}" in value:
+        return None
+    return value[:50]
+
+
 def parse_linkedin_result(result: dict) -> Optional[LinkedInProfile]:
     """Parse a DuckDuckGo search result into a LinkedIn profile."""
     url = result.get('href', '')
@@ -217,7 +227,7 @@ def parse_linkedin_result(result: dict) -> Optional[LinkedInProfile]:
     for pattern in location_patterns:
         match = re.search(pattern, snippet, re.IGNORECASE)
         if match:
-            location = match.group(1).strip()[:50]  # Limit length
+            location = _clean_location(match.group(1))
             break
     
     return LinkedInProfile(
@@ -463,7 +473,7 @@ def profile_from_url_slug(url: str) -> Optional[LinkedInProfile]:
     )
 
 
-def search_profile_from_url(url: str) -> Optional[LinkedInProfile]:
+async def search_profile_from_url(url: str) -> Optional[LinkedInProfile]:
     """Return a direct URL profile only when search results confirm it exists."""
     canonical_url = canonical_linkedin_url(url)
     if not canonical_url:
@@ -476,12 +486,7 @@ def search_profile_from_url(url: str) -> Optional[LinkedInProfile]:
     ]
 
     for search_query in queries:
-        try:
-            from ddgs import DDGS
-            results = DDGS().text(search_query, max_results=5)
-        except Exception as e:
-            print(f"DuckDuckGo direct URL validation failed for '{search_query}': {e}")
-            continue
+        results = await search_duckduckgo(search_query, max_results=5)
 
         for result in results:
             if canonical_linkedin_url(result.get("href", "")) != canonical_url:
@@ -508,6 +513,33 @@ async def search_duckduckgo(query: str, max_results: int) -> list[dict]:
         return []
 
 
+async def search_duckduckgo_queries(
+    queries: list[str],
+    max_results: int,
+    *,
+    target_name: Optional[str],
+    target_company: Optional[str],
+) -> list[dict]:
+    """Search DDG conservatively to avoid rate limits from parallel fan-out."""
+    all_results: list[dict] = []
+    seen_urls: set[str] = set()
+    searched_company_variants = bool(target_name and target_company)
+
+    for index, search_query in enumerate(queries):
+        results = await search_duckduckgo(search_query, max_results)
+        for result in results:
+            url = canonical_linkedin_url(result.get("href", ""))
+            if url and url not in seen_urls:
+                seen_urls.add(url)
+                all_results.append(result)
+
+        searched_company_queries = index >= len(queries) - 2
+        if len(all_results) >= max_results * 2 and (not searched_company_variants or searched_company_queries):
+            break
+
+    return all_results
+
+
 async def search_linkedin(query: str, max_results: int = 10) -> LinkedInSearchResult:
     """
     Search for LinkedIn profiles using DuckDuckGo.
@@ -518,7 +550,7 @@ async def search_linkedin(query: str, max_results: int = 10) -> LinkedInSearchRe
     
     # Step 0: Check if query is a direct LinkedIn URL
     if is_linkedin_profile_url(query):
-        profile = search_profile_from_url(query.strip())
+        profile = await search_profile_from_url(query.strip())
         if not profile:
             profile = profile_from_url_slug(query.strip())
         return LinkedInSearchResult(
@@ -566,25 +598,14 @@ async def search_linkedin(query: str, max_results: int = 10) -> LinkedInSearchRe
         clean_query = re.sub(r'\blinkedin\b', '', query, flags=re.IGNORECASE).strip()
         search_queries.append(f'{clean_query} site:linkedin.com/in')
     
-    # Step 3: Search DuckDuckGo with multiple queries in parallel
-    all_results = []
-    seen_urls = set()
-
-    search_result_sets = await asyncio.gather(*[
-        search_duckduckgo(search_query, max_results)
-        for search_query in search_queries
-    ])
-    _log_timing(f"all ddg queries completed in {perf_counter() - total_started_at:.2f}s ({len(search_queries)} queries)")
-    for results in search_result_sets:
-        for r in results:
-            url = canonical_linkedin_url(r.get('href', ''))
-            if url and url not in seen_urls:
-                seen_urls.add(url)
-                all_results.append(r)
-            if len(all_results) >= max_results * 2:
-                break
-        if len(all_results) >= max_results * 2:
-            break
+    # Step 3: Search DuckDuckGo with multiple queries.
+    all_results = await search_duckduckgo_queries(
+        search_queries,
+        max_results,
+        target_name=target_name,
+        target_company=target_company,
+    )
+    _log_timing(f"ddg queries completed in {perf_counter() - total_started_at:.2f}s ({len(search_queries)} queries)")
     
     if not all_results:
         return LinkedInSearchResult(
